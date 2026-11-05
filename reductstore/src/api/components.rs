@@ -92,6 +92,7 @@ impl StateKeeper {
             .and_then(|header| header.to_str().ok())
             .and_then(|value| value.parse::<IpAddr>().ok());
 
+        let mut repo = components.token_repo.write().await?;
         components
             .auth
             .check(
@@ -99,10 +100,11 @@ impl StateKeeper {
                     .get("Authorization")
                     .map(|header| header.to_str().unwrap_or("")),
                 client_ip,
-                components.token_repo.write().await?.as_mut(),
+                repo.as_mut(),
                 policy,
             )
             .await?;
+        drop(repo);
 
         components.license_device_guard.check(headers)?;
 

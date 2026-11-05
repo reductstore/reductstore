@@ -33,6 +33,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
+use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
 const TOKEN_LAST_ACCESS_CACHE_TTL: Duration = Duration::from_secs(10);
@@ -47,6 +48,7 @@ pub(super) struct ReadOnlyTokenRepository {
     last_access_cache: HashMap<String, u64>,
     last_access_cache_updated_at: Option<Instant>,
     file_cache: Arc<FileCache>,
+    refresh: Option<JoinHandle<Result<HashMap<String, Token>, ReductError>>>,
 }
 
 const AUTH_CACHE_SIZE: usize = 1024;
@@ -82,6 +84,7 @@ impl ReadOnlyTokenRepository {
             last_access_cache: HashMap::new(),
             last_access_cache_updated_at: None,
             file_cache,
+            refresh: None,
         };
         let repo = token_repository
             .load_repo()
@@ -126,19 +129,28 @@ impl ReadOnlyTokenRepository {
     }
 
     async fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
-        let api_token = self.cfg.api_token.as_str().to_string();
+        Self::load_repo_from(
+            self.config_path.clone(),
+            self.cfg.clone(),
+            Arc::clone(&self.file_cache),
+        )
+        .await
+    }
 
-        self.file_cache.discard_recursive(&self.config_path).await?; // ensure we update it from backend
+    async fn load_repo_from(
+        config_path: PathBuf,
+        cfg: Cfg,
+        file_cache: Arc<FileCache>,
+    ) -> Result<HashMap<String, Token>, ReductError> {
+        let api_token = cfg.api_token.as_str().to_string();
+
+        file_cache.discard_recursive(&config_path).await?;
         let mut repo: HashMap<String, Token> = HashMap::new();
-        match self
-            .file_cache
-            .read(&self.config_path, SeekFrom::Start(0))
-            .await
-        {
+        match file_cache.read(&config_path, SeekFrom::Start(0)).await {
             Ok(mut lock) => {
                 debug!(
                     "Loading token repository from {}",
-                    self.config_path.as_path().display()
+                    config_path.as_path().display()
                 );
 
                 let mut buf = Vec::new();
@@ -152,7 +164,7 @@ impl ReadOnlyTokenRepository {
                     repo.insert(token.name.clone(), token.into());
                 }
             }
-            Err(_) => error!("Token repository not found at {:?}", self.config_path),
+            Err(_) => error!("Token repository not found at {:?}", config_path),
         };
 
         if !api_token.is_empty() {
@@ -192,6 +204,26 @@ impl ReadOnlyTokenRepository {
     }
 
     async fn update_repo(&mut self) -> Result<(), ReductError> {
+        if self.refresh.as_ref().is_some_and(JoinHandle::is_finished) {
+            let refresh = self.refresh.take().expect("finished refresh must exist");
+            match refresh.await {
+                Ok(Ok(repo)) => {
+                    self.repo = repo;
+                    self.auth_cache.clear();
+                }
+                Ok(Err(err)) => {
+                    error!("Failed to refresh replica token repository: {}", err);
+                }
+                Err(err) => {
+                    error!("Replica token repository refresh task failed: {}", err);
+                }
+            }
+        }
+
+        if self.refresh.is_some() {
+            return Ok(());
+        }
+
         let mut last_sync = self.last_replica_sync.write().await?;
         if self.cfg.role != InstanceRole::Replica
             || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
@@ -202,8 +234,12 @@ impl ReadOnlyTokenRepository {
 
         *last_sync = Instant::now();
 
-        self.repo = self.load_repo().await?;
-        self.auth_cache.clear();
+        let config_path = self.config_path.clone();
+        let cfg = self.cfg.clone();
+        let file_cache = Arc::clone(&self.file_cache);
+        self.refresh = Some(tokio::spawn(async move {
+            Self::load_repo_from(config_path, cfg, file_cache).await
+        }));
 
         Ok(())
     }
@@ -449,6 +485,10 @@ mod tests {
             // Force reload
             tokio::time::sleep(Duration::from_millis(200)).await;
 
+            // The first request schedules a refresh and uses the last good snapshot.
+            assert!(repo.get_token("file_token").await.is_ok());
+            tokio::time::sleep(Duration::from_millis(20)).await;
+
             // Check if the new token is loaded
             assert_eq!(
                 repo.get_token("new_file_token").await.unwrap().name,
@@ -615,6 +655,13 @@ mod tests {
             };
             write_token_to_file(&path, &updated_token).await;
             tokio::time::sleep(Duration::from_millis(200)).await;
+
+            // The first request schedules a refresh and uses the cached credential.
+            assert!(repo
+                .validate_token(Some("Bearer file_value"), None)
+                .await
+                .is_ok());
+            tokio::time::sleep(Duration::from_millis(20)).await;
 
             let err = repo
                 .validate_token(Some("Bearer file_value"), None)

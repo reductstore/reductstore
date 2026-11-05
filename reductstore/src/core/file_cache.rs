@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{OwnedRwLockWriteGuard, RwLockWriteGuard};
+use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::time::sleep;
 
 pub(crate) const FILE_CACHE_MAX_SIZE: usize = 512;
@@ -39,6 +39,29 @@ struct BatchRegistry {
 struct PathAccessGuard {
     path: PathBuf,
     pending_accesses: Arc<Mutex<HashMap<PathBuf, usize>>>,
+}
+
+struct PathInvalidationGuard {
+    path: PathBuf,
+    locks: Arc<AsyncRwLock<HashMap<PathBuf, std::sync::Weak<AsyncRwLock<()>>>>>,
+    path_lock: Option<Arc<AsyncRwLock<()>>>,
+    lock: Option<OwnedRwLockWriteGuard<()>>,
+}
+
+impl Drop for PathInvalidationGuard {
+    fn drop(&mut self) {
+        self.lock.take();
+        self.path_lock.take();
+
+        if let Some(mut locks) = self.locks.try_write() {
+            if locks
+                .get(&self.path)
+                .is_some_and(|lock| lock.strong_count() == 0)
+            {
+                locks.remove(&self.path);
+            }
+        }
+    }
 }
 
 impl Drop for PathAccessGuard {
@@ -93,6 +116,7 @@ pub(crate) struct FileCache {
     backend: Arc<AsyncRwLock<Backend>>,
     batches: Arc<AsyncRwLock<BatchRegistry>>,
     pending_accesses: Arc<Mutex<HashMap<PathBuf, usize>>>,
+    invalidating_paths: Arc<AsyncRwLock<HashMap<PathBuf, std::sync::Weak<AsyncRwLock<()>>>>>,
     sync_interval: Arc<RwLock<Duration>>,
     read_only: Arc<AtomicBool>,
 }
@@ -133,6 +157,7 @@ impl FileCache {
         let batches_clone = Arc::clone(&batches);
         let pending_accesses = Arc::new(Mutex::new(HashMap::new()));
         let pending_accesses_clone = Arc::clone(&pending_accesses);
+        let invalidating_paths = Arc::new(AsyncRwLock::new(HashMap::new()));
         let sync_interval = Arc::new(RwLock::new(sync_interval));
         let sync_interval_clone = Some(Arc::clone(&sync_interval));
         let read_only = Arc::new(AtomicBool::new(false));
@@ -167,6 +192,7 @@ impl FileCache {
             backend: backpack,
             batches,
             pending_accesses,
+            invalidating_paths,
             sync_interval,
             read_only,
         }
@@ -415,6 +441,7 @@ impl FileCache {
     ///
     /// A file reference
     pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileGuard, ReductError> {
+        let _invalidation_guard = self.lock_path(path).await?;
         let cache = self.cache.read().await?;
         let _access_guard = Self::reserve_access(&self.pending_accesses, path)?;
         let cached_file = cache.get(path).cloned();
@@ -455,6 +482,7 @@ impl FileCache {
         path: &PathBuf,
         pos: SeekFrom,
     ) -> Result<FileGuard, ReductError> {
+        let _invalidation_guard = self.lock_path(path).await?;
         let cache = self.cache.read().await?;
         let _access_guard = Self::reserve_access(&self.pending_accesses, path)?;
         let cached_file = cache.get(path).cloned();
@@ -613,9 +641,7 @@ impl FileCache {
         }
         self.reject_batched_operation(path).await?;
 
-        let mut cache = self.cache.write().await?;
-        self.discard_recursive_with_locked_cache(path, &mut cache)
-            .await?;
+        self.discard_recursive_with_locked_cache(path).await?;
         if path.try_exists()? {
             let backend = self.backend.read().await?.clone();
             backend.remove_dir_all(path).await?;
@@ -631,36 +657,35 @@ impl FileCache {
     /// and has not been synced, it attempts to sync the file before removing it from the cache.
     ///
     pub async fn discard_recursive(&self, path: &PathBuf) -> Result<(), ReductError> {
-        let mut cache = self.cache.write().await?;
-        self.discard_recursive_with_locked_cache(path, &mut cache)
-            .await
+        self.discard_recursive_with_locked_cache(path).await
     }
 
-    /// We need the method to lock the cache only once across multiple calls so that we prevent race conditions
-    async fn discard_recursive_with_locked_cache(
-        &self,
-        path: &PathBuf,
-        cache: &mut RwLockWriteGuard<'_, Cache<PathBuf, FileLock>>,
-    ) -> Result<(), ReductError> {
+    /// Evicts paths one at a time so waits for an active descriptor do not block unrelated cache reads.
+    async fn discard_recursive_with_locked_cache(&self, path: &PathBuf) -> Result<(), ReductError> {
         let normalized_path = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-        let files_to_remove = cache
-            .keys()
-            .iter()
-            .filter(|file_path| {
-                file_path.starts_with(path)
-                    || fs::canonicalize(file_path)
-                        .map(|p| p.starts_with(&normalized_path))
-                        .unwrap_or(false)
-            })
-            .map(|file_path| (*file_path).clone())
-            .collect::<Vec<PathBuf>>();
+        let files_to_remove = {
+            let cache = self.cache.read().await?;
+            cache
+                .keys()
+                .iter()
+                .filter(|file_path| {
+                    file_path.starts_with(path)
+                        || fs::canonicalize(file_path)
+                            .map(|p| p.starts_with(&normalized_path))
+                            .unwrap_or(false)
+                })
+                .map(|file_path| (*file_path).clone())
+                .collect::<Vec<PathBuf>>()
+        };
 
         for file_path in files_to_remove {
+            let _invalidation_guard = self.lock_path(&file_path).await?;
             // A batch owns publication of this exact path, including its cached descriptor.
             if Self::is_batched(&self.batches, &file_path).await? {
                 continue;
             }
-            if let Some(file) = cache.remove(&file_path) {
+            let file = self.cache.write().await?.remove(&file_path);
+            if let Some(file) = file {
                 let mut lock = file.write_owned().await?;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
                     if let Err(err) = lock.sync_all().await {
@@ -699,11 +724,7 @@ impl FileCache {
         self.reject_batched_operation(old_path).await?;
         self.reject_batched_operation(new_path).await?;
 
-        // important to keep cache preventing race conditions
-        let mut cache = self.cache.write().await?;
-        self.discard_recursive_with_locked_cache(old_path, &mut cache)
-            .await?;
-        cache.remove(old_path);
+        self.discard_recursive_with_locked_cache(old_path).await?;
 
         let backend = self.backend.read().await?.clone();
         backend.rename(old_path, new_path).await?;
@@ -800,6 +821,28 @@ impl FileCache {
             .lock()
             .map_err(|err| internal_server_error!("Failed to lock pending accesses: {}", err))?
             .contains_key(path))
+    }
+
+    async fn lock_path(&self, path: &PathBuf) -> Result<PathInvalidationGuard, ReductError> {
+        let lock = {
+            let mut locks = self.invalidating_paths.write().await?;
+            locks
+                .entry(path.clone())
+                .or_insert_with(std::sync::Weak::new)
+                .upgrade()
+                .unwrap_or_else(|| {
+                    let lock = Arc::new(AsyncRwLock::new(()));
+                    locks.insert(path.clone(), Arc::downgrade(&lock));
+                    lock
+                })
+        };
+
+        Ok(PathInvalidationGuard {
+            path: path.clone(),
+            locks: Arc::clone(&self.invalidating_paths),
+            path_lock: Some(Arc::clone(&lock)),
+            lock: Some(lock.write_owned().await?),
+        })
     }
 
     async fn mark_owned_dirty(&self, path: &Path) -> Result<(), ReductError> {
@@ -1223,6 +1266,44 @@ mod tests {
         });
         cache.stop_sync_worker.store(true, Ordering::Relaxed);
         cache
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn discarding_busy_file_does_not_block_unrelated_reads(tmp_dir: PathBuf) {
+        let cache = FileCache::with_local_backend(tmp_dir.clone())
+            .await
+            .unwrap();
+        let busy_path = tmp_dir.join("busy.blk");
+        let unrelated_path = tmp_dir.join("tokens.json");
+
+        {
+            let mut file = cache
+                .write_or_create(&busy_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"block data").unwrap();
+        }
+
+        let busy_guard = cache.read(&busy_path, SeekFrom::Start(0)).await.unwrap();
+        let discard_cache = Arc::clone(&cache);
+        let discard =
+            tokio::spawn(async move { discard_cache.discard_recursive(&busy_path).await });
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!discard.is_finished());
+
+        tokio::time::timeout(Duration::from_millis(100), async {
+            cache
+                .write_or_create(&unrelated_path, SeekFrom::Start(0))
+                .await
+        })
+        .await
+        .expect("unrelated cache reads must not wait for invalidation")
+        .unwrap();
+
+        drop(busy_guard);
+        discard.await.unwrap().unwrap();
     }
 
     #[rstest]

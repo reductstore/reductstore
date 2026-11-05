@@ -525,13 +525,13 @@ pub(super) mod tests {
     #[tokio::test]
     async fn log_system_event_writes_success_message() {
         let captured = Arc::new(Mutex::new(Vec::<SystemEvent>::new()));
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
+        let sink = SystemEventSink::new(
+            Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
                 events: Arc::clone(&captured),
             })
                 as Box<dyn LogSystemEvent + Send + Sync>)),
-            instance_name: "instance-1".to_string(),
-        };
+            "instance-1".to_string(),
+        );
 
         LifecycleTask::log_system_event(
             Some(sink),
@@ -570,13 +570,13 @@ pub(super) mod tests {
     #[tokio::test]
     async fn log_system_event_writes_compression_metrics() {
         let captured = Arc::new(Mutex::new(Vec::<SystemEvent>::new()));
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
+        let sink = SystemEventSink::new(
+            Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
                 events: Arc::clone(&captured),
             })
                 as Box<dyn LogSystemEvent + Send + Sync>)),
-            instance_name: "instance-1".to_string(),
-        };
+            "instance-1".to_string(),
+        );
 
         LifecycleTask::log_system_event(
             Some(sink),
@@ -606,13 +606,13 @@ pub(super) mod tests {
     #[tokio::test]
     async fn log_system_event_writes_error_message() {
         let captured = Arc::new(Mutex::new(Vec::<SystemEvent>::new()));
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
+        let sink = SystemEventSink::new(
+            Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
                 events: Arc::clone(&captured),
             })
                 as Box<dyn LogSystemEvent + Send + Sync>)),
-            instance_name: "instance-1".to_string(),
-        };
+            "instance-1".to_string(),
+        );
 
         let err = unprocessable_entity!("failed to run");
         LifecycleTask::log_system_event(

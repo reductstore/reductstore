@@ -147,12 +147,8 @@ async fn write_audit_event(
     };
 
     let sink = components.system_events.sink();
-    match sink.system_logger.write().await {
-        Ok(mut logger) => {
-            if let Err(err) = logger.log_event(event).await {
-                debug!("Failed to persist audit event: {}", err);
-            }
-        }
-        Err(err) => debug!("Failed to lock system event logger: {}", err),
-    };
+    let result = sink.log_event(event).await;
+    if let Err(err) = result {
+        debug!("Failed to enqueue audit event: {}", err);
+    }
 }
