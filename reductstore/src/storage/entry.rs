@@ -359,6 +359,14 @@ impl Entry {
             return Ok(());
         }
 
+        if !self.has_compaction_work().await? {
+            debug!(
+                "Skipping compact for {}/{} because there are no dirty entries to persist",
+                self.bucket_name, self.name
+            );
+            return Ok(());
+        }
+
         let publication = self.publication.begin_mutation(&self.path).await?;
         if let Some(mut bm) = self.block_manager.try_write() {
             bm.set_mutation_batch(publication.token.clone());
@@ -377,6 +385,29 @@ impl Entry {
             );
             Ok(())
         }
+    }
+
+    /// Returns whether compaction has real work to publish.
+    ///
+    /// Compaction only ever persists metadata and the block index for blocks
+    /// that have a pending WAL. An entry that has already been published and
+    /// whose WAL is drained has nothing to flush, so the `Updating -> Ready`
+    /// publication cycle can be skipped entirely. An entry that has never been
+    /// published still needs its initial marker bootstrap.
+    async fn has_compaction_work(&self) -> Result<bool, ReductError> {
+        let Some(bm) = self.block_manager.try_read() else {
+            // If we cannot inspect the block manager right now, be conservative
+            // and proceed through the regular compact path, which itself skips
+            // when the block manager is busy.
+            return Ok(true);
+        };
+        if bm.has_pending_wal().await? {
+            return Ok(true);
+        }
+        Ok(!self
+            .file_cache
+            .try_exists(&self.path.join(".publication"))
+            .await?)
     }
 
     /// Flushes entry metadata and block index to the storage backend.
@@ -839,6 +870,28 @@ mod tests {
                 .await
                 .unwrap()
                 .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_skips_publication_when_clean(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+
+            // Write a record and flush it fully. After a full sync the WAL is
+            // drained, so a subsequent compaction has nothing to persist and must
+            // not start a new Updating -> Ready publication cycle (issue #1634).
+            write_stub_record(&entry, 1).await;
+            entry.sync_fs().await.unwrap();
+
+            let before = publication::load(&entry.path, &file_cache).await.unwrap();
+
+            entry.compact().await.unwrap();
+
+            let after = publication::load(&entry.path, &file_cache).await.unwrap();
+            assert_eq!(after, before);
         }
 
         #[rstest]
