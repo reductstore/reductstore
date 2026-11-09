@@ -502,6 +502,14 @@ mod tests {
         assert_eq!(WalImpl::parse_wal_block_id(&PathBuf::from("bad.wal")), None);
     }
 
+    #[test]
+    fn decode_rejects_remove_record_with_invalid_length() {
+        let error = WalEntry::decode(3, &[0; 7]).unwrap_err();
+
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "Invalid WAL remove-record entry length");
+    }
+
     #[rstest]
     #[tokio::test]
     async fn test_crc_error(#[future] wal: WalImpl, file_cache: Arc<FileCache>) {
