@@ -70,16 +70,20 @@ impl WalEntry {
     pub fn decode(type_code: u8, buf: &[u8]) -> Result<Self, ReductError> {
         match type_code {
             0 => {
-                let record = Record::decode(buf).unwrap();
+                let record = Record::decode(buf)
+                    .map_err(|err| internal_server_error!("Invalid WAL record: {}", err))?;
                 Ok(WalEntry::WriteRecord(record))
             }
             1 => {
-                let record = Record::decode(buf).unwrap();
+                let record = Record::decode(buf)
+                    .map_err(|err| internal_server_error!("Invalid WAL record: {}", err))?;
                 Ok(WalEntry::UpdateRecord(record))
             }
             2 => Ok(WalEntry::RemoveBlock),
             3 => {
-                let record_id = u64::from_be_bytes(buf.try_into().unwrap());
+                let record_id = u64::from_be_bytes(buf.try_into().map_err(|_| {
+                    internal_server_error!("Invalid WAL remove-record entry length")
+                })?);
                 Ok(WalEntry::RemoveRecord(record_id))
             }
             _ => Err(internal_server_error!("Invalid WAL entry")),
@@ -252,6 +256,9 @@ impl Wal for WalImpl {
         loop {
             let entry_type = match file.read_u8() {
                 Ok(t) => t,
+                Err(err) if !entries.is_empty() && err.kind() == ErrorKind::UnexpectedEof => {
+                    return Ok(entries)
+                }
                 Err(err) => return Err(err.into()),
             };
 
@@ -262,20 +269,45 @@ impl Wal for WalImpl {
             let mut crc = Digest::new();
             crc.write(&[entry_type]);
 
-            let len = file.read_u64::<BigEndian>()?;
+            let len = match file.read_u64::<BigEndian>() {
+                Ok(len) => len,
+                Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
+                    return Self::recover_prefix_or_error(entries, &path)
+                }
+                Err(err) => return Err(err.into()),
+            };
+            let position = file.stream_position()?;
+            if len > WAL_FILE_SIZE.saturating_sub(position + mem::size_of::<u64>() as u64 + 1) {
+                return Self::recover_prefix_or_error(entries, &path);
+            }
             crc.write(&len.to_be_bytes());
 
             let mut buf = vec![0; len as usize];
-            file.read_exact(&mut buf)?;
+            if let Err(err) = file.read_exact(&mut buf) {
+                if err.kind() == ErrorKind::UnexpectedEof {
+                    return Self::recover_prefix_or_error(entries, &path);
+                }
+                return Err(err.into());
+            }
             crc.write(&buf);
 
-            let crc_bytes = file.read_u64::<BigEndian>()?;
+            let crc_bytes = match file.read_u64::<BigEndian>() {
+                Ok(crc) => crc,
+                Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
+                    return Self::recover_prefix_or_error(entries, &path)
+                }
+                Err(err) => return Err(err.into()),
+            };
 
             if crc.sum64() != crc_bytes {
-                return Err(internal_server_error!("WAL {:?} is corrupted", path));
+                return Self::recover_prefix_or_error(entries, &path);
             }
 
-            let entry = WalEntry::decode(entry_type, &buf)?;
+            let entry = match WalEntry::decode(entry_type, &buf) {
+                Ok(entry) => entry,
+                Err(_) if !entries.is_empty() => return Ok(entries),
+                Err(err) => return Err(err),
+            };
             entries.push(entry);
         }
 
@@ -297,6 +329,18 @@ impl Wal for WalImpl {
 }
 
 impl WalImpl {
+    fn recover_prefix_or_error(
+        entries: Vec<WalEntry>,
+        path: &Path,
+    ) -> Result<Vec<WalEntry>, ReductError> {
+        if entries.is_empty() {
+            Err(internal_server_error!("WAL {:?} is corrupted", path))
+        } else {
+            warn!("Ignoring incomplete WAL tail in {:?}", path);
+            Ok(entries)
+        }
+    }
+
     async fn write_or_create(
         &self,
         path: &PathBuf,
@@ -479,6 +523,39 @@ mod tests {
         .unwrap();
         let err = wal.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn read_keeps_valid_entries_before_torn_tail(
+        #[future] wal: WalImpl,
+        file_cache: Arc<FileCache>,
+    ) {
+        let mut wal = wal.await;
+        wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
+            .unwrap();
+        wal.append(1, WalEntry::UpdateRecord(Record::default()))
+            .await
+            .unwrap();
+
+        let path = wal.block_wal_path(1);
+        let first_entry_len = 1 + (std::mem::size_of::<u64>() * 2) as u64 + 1;
+        let mut file = OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start(first_entry_len)).unwrap();
+        file.write_all(&[0; 10]).unwrap();
+
+        let wal = create_wal(
+            wal.root_path.parent().unwrap().to_path_buf(),
+            file_cache.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            wal.read(1).await.unwrap(),
+            vec![WalEntry::WriteRecord(Record::default())]
+        );
     }
 
     #[rstest]
