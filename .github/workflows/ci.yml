@@ -77,10 +77,10 @@ jobs:
             os: ubuntu-22.04
             compiler: "gcc-mingw-w64-x86-64"
           - target: "x86_64-apple-darwin"
-            os: macos-14
+            os: macos-15
             compiler: ""
           - target: "aarch64-apple-darwin"
-            os: macos-14
+            os: macos-15
             compiler: ""
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -99,13 +99,13 @@ jobs:
       - build_binaries
     strategy:
       matrix:
-        os: [ ubuntu-24.04, windows-2022, macos-14 ]
+        os: [ ubuntu-24.04, windows-2022, macos-15 ]
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: windows-2022
             target: x86_64-pc-windows-gnu
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
@@ -296,6 +296,7 @@ jobs:
         version:
           [
             "latest",
+            "v1.20.13",
             "v1.19.10",
             "v1.18.10",
             "v1.17.10",
@@ -342,6 +343,24 @@ jobs:
         with:
           cmd: ${{ matrix.cmd }}
           rs_api_token: ${{ env.rs_api_token }}
+          repository: ${{ github.repository }}
+
+  durability_test:
+    name: Acknowledged Write Durability Test
+    runs-on: ubuntu-latest
+    needs:
+      - unit_tests
+      - build_test_docker_image
+    timeout-minutes: 5
+    env:
+      RS_API_TOKEN: XXXX
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Hosted runners retain their page cache after `docker kill`; this verifies
+      # crash recovery, while physical power-loss testing remains environment-specific.
+      - uses: ./.github/actions/durability-test
+        with:
+          rs_api_token: ${{ env.RS_API_TOKEN }}
           repository: ${{ github.repository }}
 
   replication_test:
@@ -443,6 +462,7 @@ jobs:
       - http_api_tests
       - zenoh_api_tests
       - migration_test
+      - durability_test
       - replication_test
       - read_only_replica_test
       - primary_secondary_test
@@ -569,6 +589,7 @@ jobs:
       - zenoh_api_tests
       - migration_test
       - recovery_test
+      - durability_test
       - replication_test
       - read_only_replica_test
       - primary_secondary_test

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 ARG BUILDPLATFORM
-ARG FINAL_BASE_IMAGE=reduct/debian-base:trixie@sha256:8e69707a14a0eaa3af1cddc8c8d7ae1303fd08e1e9c1419c6b97d168f0a29d9a
+ARG FINAL_BASE_IMAGE=reduct/debian-base:trixie@sha256:6d31d5080c6d9d9c67d3652783eec349cb19465a09514c9a8f02c3ffde9fedcf
 FROM --platform=${BUILDPLATFORM} ${FINAL_BASE_IMAGE} AS builder
 ARG BUILDPLATFORM
 
