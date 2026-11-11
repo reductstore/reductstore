@@ -134,6 +134,22 @@ impl Entry {
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
     pub async fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
+        self.query_with_tombstones(query_parameters, false).await
+    }
+
+    pub(super) async fn query_raw(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
+        self.query_with_tombstones(query_parameters, true).await
+    }
+
+    async fn query_with_tombstones(
+        &self,
+        mut query_parameters: QueryEntry,
+        include_tombstones: bool,
+    ) -> Result<u64, ReductError> {
+        if !include_tombstones {
+            self.system_behavior
+                .apply_default_query_filters(&mut query_parameters);
+        }
         let (start, stop) = self.get_query_time_range(&query_parameters).await?;
         let id = next_query_id();
         let block_manager = Arc::clone(&self.block_manager);

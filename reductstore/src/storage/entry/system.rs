@@ -66,6 +66,8 @@ pub(crate) trait SystemEntryBehavior {
     }
 
     async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError>;
+
+    fn apply_default_query_filters(&self, _query: &mut QueryEntry) {}
 }
 
 pub(crate) struct RegularEntryBehavior;
@@ -119,6 +121,30 @@ impl SystemEntryBehavior for MetaEntryBehavior {
         entry.remove_records_in_current_mutation(timestamps).await?;
 
         Ok(())
+    }
+
+    fn apply_default_query_filters(&self, query: &mut QueryEntry) {
+        // Tombstones (and the older versions marked with them) are retained for
+        // replication and direct timestamp reads, but are not attachments.
+        let exclude = json!([{
+            "$and": [
+                {"$has": "remove"}, {"&remove": {"$eq": true}}
+            ]
+        }]);
+
+        let when = query.when.get_or_insert_with(|| json!({}));
+        match when.as_object_mut().unwrap().entry("$not") {
+            serde_json::map::Entry::Vacant(entry) => {
+                entry.insert(exclude);
+            }
+            serde_json::map::Entry::Occupied(mut entry) => {
+                entry
+                    .get_mut()
+                    .as_array_mut()
+                    .unwrap()
+                    .push(exclude.get(0).unwrap().clone());
+            }
+        }
     }
 
     fn validate_remove_records(&self, entry_name: &str) -> Result<(), ReductError> {
