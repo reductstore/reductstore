@@ -106,49 +106,14 @@ impl Entry {
                 continue;
             };
 
-            if is_system_meta_entry(&self.name)
-                && update.get("remove").is_some_and(|value| value == "true")
-            {
-                if let Some(key) = record
-                    .labels
-                    .iter()
-                    .find(|label| label.name == "key")
-                    .map(|label| label.value.clone())
-                {
-                    let key = if key.starts_with('$') {
-                        format!("${key}")
-                    } else {
-                        key
-                    };
-                    let timestamps = self
-                        .query_record_timestamps(QueryEntry {
-                            start: Some(0),
-                            stop: Some(u64::MAX),
-                            when: Some(json!({
-                                "$has": "key",
-                                "&key": {"$eq": key}
-                            })),
-                            ..Default::default()
-                        })
-                        .await?;
-
-                    for timestamp in timestamps {
-                        if timestamp != time && scheduled_tombstones.insert(timestamp) {
-                            updates.push_back((
-                                UpdateLabels {
-                                    time: timestamp,
-                                    update: Labels::from_iter([(
-                                        "remove".to_string(),
-                                        "true".to_string(),
-                                    )]),
-                                    remove: HashSet::new(),
-                                },
-                                false,
-                            ));
-                        }
-                    }
-                }
-            }
+            self.propagate_meta_tombstone(
+                &record,
+                time,
+                &update,
+                &mut scheduled_tombstones,
+                &mut updates,
+            )
+            .await?;
 
             let record = Entry::update_single_label(record, update, remove);
             records_per_block
@@ -189,6 +154,62 @@ impl Entry {
         self.publication
             .schedule_publish(self.path.clone(), Arc::clone(&self.block_manager));
         Ok(result)
+    }
+
+    async fn propagate_meta_tombstone(
+        &self,
+        record: &Record,
+        time: u64,
+        update: &Labels,
+        scheduled_tombstones: &mut HashSet<u64>,
+        updates: &mut VecDeque<(UpdateLabels, bool)>,
+    ) -> Result<(), ReductError> {
+        if !is_system_meta_entry(&self.name)
+            || !update.get("remove").is_some_and(|value| value == "true")
+        {
+            return Ok(());
+        }
+
+        let Some(key) = record
+            .labels
+            .iter()
+            .find(|label| label.name == "key")
+            .map(|label| label.value.clone())
+        else {
+            return Ok(());
+        };
+
+        let key = if key.starts_with('$') {
+            format!("${key}")
+        } else {
+            key
+        };
+        let timestamps = self
+            .query_record_timestamps(QueryEntry {
+                start: Some(0),
+                stop: Some(u64::MAX),
+                when: Some(json!({
+                    "$has": "key",
+                    "&key": {"$eq": key}
+                })),
+                ..Default::default()
+            })
+            .await?;
+
+        for timestamp in timestamps {
+            if timestamp != time && scheduled_tombstones.insert(timestamp) {
+                updates.push_back((
+                    UpdateLabels {
+                        time: timestamp,
+                        update: Labels::from_iter([("remove".to_string(), "true".to_string())]),
+                        remove: HashSet::new(),
+                    },
+                    false,
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     pub(in crate::storage::entry) fn update_single_label(
