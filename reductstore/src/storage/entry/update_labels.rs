@@ -1,12 +1,14 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::storage::entry::Entry;
+use crate::storage::entry::{is_system_meta_entry, Entry};
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
 use reduct_base::error::ReductError;
+use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{not_found, Labels};
-use std::collections::{BTreeMap, HashSet};
+use serde_json::json;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
@@ -45,11 +47,29 @@ impl Entry {
             .set_mutation_batch(publication.token.clone());
         let mut result = UpdateResult::new();
         let mut records_per_block = BTreeMap::new();
-        for UpdateLabels {
-            time,
-            update,
-            remove,
-        } in updates
+        let mut updates = updates
+            .into_iter()
+            .map(|update| (update, true))
+            .collect::<VecDeque<_>>();
+        let mut scheduled_tombstones = updates
+            .iter()
+            .filter(|update| {
+                update
+                    .0
+                    .update
+                    .get("remove")
+                    .is_some_and(|value| value == "true")
+            })
+            .map(|update| update.0.time)
+            .collect::<HashSet<_>>();
+        while let Some((
+            UpdateLabels {
+                time,
+                update,
+                remove,
+            },
+            report_result,
+        )) = updates.pop_front()
         {
             // Find the block/record first, then apply a label update.
             let located = {
@@ -63,38 +83,53 @@ impl Entry {
                             .map(|record| (block.block_id(), record))
                     }
                     Err(err) => {
-                        result.insert(time, Err(err));
+                        if report_result {
+                            result.insert(time, Err(err));
+                        }
                         continue;
                     }
                 }
             };
 
             let Some((block_id, record)) = located else {
-                result.insert(
-                    time,
-                    Err(not_found!(
-                        "Record {} not found in entry {}/{}",
+                if report_result {
+                    result.insert(
                         time,
-                        self.bucket_name,
-                        self.name
-                    )),
-                );
+                        Err(not_found!(
+                            "Record {} not found in entry {}/{}",
+                            time,
+                            self.bucket_name,
+                            self.name
+                        )),
+                    );
+                }
                 continue;
             };
+
+            self.propagate_meta_tombstone(
+                &record,
+                time,
+                &update,
+                &mut scheduled_tombstones,
+                &mut updates,
+            )
+            .await?;
 
             let record = Entry::update_single_label(record, update, remove);
             records_per_block
                 .entry(block_id)
                 .or_insert_with(Vec::new)
                 .push(record.clone());
-            result.insert(
-                time,
-                Ok(record
-                    .labels
-                    .iter()
-                    .map(|label| (label.name.clone(), label.value.clone()))
-                    .collect()),
-            );
+            if report_result {
+                result.insert(
+                    time,
+                    Ok(record
+                        .labels
+                        .iter()
+                        .map(|label| (label.name.clone(), label.value.clone()))
+                        .collect()),
+                );
+            }
         }
 
         // Update blocks
@@ -119,6 +154,62 @@ impl Entry {
         self.publication
             .schedule_publish(self.path.clone(), Arc::clone(&self.block_manager));
         Ok(result)
+    }
+
+    async fn propagate_meta_tombstone(
+        &self,
+        record: &Record,
+        time: u64,
+        update: &Labels,
+        scheduled_tombstones: &mut HashSet<u64>,
+        updates: &mut VecDeque<(UpdateLabels, bool)>,
+    ) -> Result<(), ReductError> {
+        if !is_system_meta_entry(&self.name)
+            || !update.get("remove").is_some_and(|value| value == "true")
+        {
+            return Ok(());
+        }
+
+        let Some(key) = record
+            .labels
+            .iter()
+            .find(|label| label.name == "key")
+            .map(|label| label.value.clone())
+        else {
+            return Ok(());
+        };
+
+        let key = if key.starts_with('$') {
+            format!("${key}")
+        } else {
+            key
+        };
+        let timestamps = self
+            .query_record_timestamps(QueryEntry {
+                start: Some(0),
+                stop: Some(u64::MAX),
+                when: Some(json!({
+                    "$has": "key",
+                    "&key": {"$eq": key}
+                })),
+                ..Default::default()
+            })
+            .await?;
+
+        for timestamp in timestamps {
+            if timestamp != time && scheduled_tombstones.insert(timestamp) {
+                updates.push_back((
+                    UpdateLabels {
+                        time: timestamp,
+                        update: Labels::from_iter([("remove".to_string(), "true".to_string())]),
+                        remove: HashSet::new(),
+                    },
+                    false,
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     pub(in crate::storage::entry) fn update_single_label(
