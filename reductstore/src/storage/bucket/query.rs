@@ -502,6 +502,62 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn direct_meta_query_hides_retained_version_after_tombstone(
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        write_meta(&bucket, "acc-a/$meta", 11, b"v1").await.unwrap();
+        write_meta(&bucket, "acc-a/$meta", 12, b"v2").await.unwrap();
+
+        let updated = bucket
+            .update_labels(vec![UpdateLabelsMulti {
+                entry_name: "acc-a/$meta".to_string(),
+                time: 12,
+                update: [("remove".to_string(), "true".to_string())]
+                    .into_iter()
+                    .collect(),
+                remove: HashSet::new(),
+            }])
+            .await
+            .unwrap();
+        assert_eq!(updated["acc-a/$meta"].len(), 1);
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["acc-a/$meta".into()]),
+            ..Default::default()
+        };
+        let id = bucket.query(query).await.unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        assert_eq!(collect_records(rx).await, Vec::<(String, u64)>::new());
+        assert!(bucket.begin_read("acc-a/$meta", 11).await.is_ok());
+        assert!(bucket.begin_read("acc-a/$meta", 12).await.is_ok());
+
+        write_meta(&bucket, "acc-a/$meta", 13, b"v3").await.unwrap();
+        assert!(bucket.begin_read("acc-a/$meta", 11).await.is_err());
+        assert!(bucket.begin_read("acc-a/$meta", 12).await.is_ok());
+        assert!(bucket.begin_read("acc-a/$meta", 13).await.is_ok());
+
+        bucket
+            .update_labels(vec![UpdateLabelsMulti {
+                entry_name: "acc-a/$meta".to_string(),
+                time: 13,
+                update: [("remove".to_string(), "true".to_string())]
+                    .into_iter()
+                    .collect(),
+                remove: HashSet::new(),
+            }])
+            .await
+            .unwrap();
+        write_meta(&bucket, "acc-a/$meta", 14, b"v4").await.unwrap();
+        assert!(bucket.begin_read("acc-a/$meta", 12).await.is_err());
+        assert!(bucket.begin_read("acc-a/$meta", 13).await.is_ok());
+        assert!(bucket.begin_read("acc-a/$meta", 14).await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn wildcard_query_excludes_meta_tombstones_by_default(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "acc-a", 10, b"a1").await.unwrap();

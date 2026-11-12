@@ -33,6 +33,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found, unprocessable_entity};
+use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -133,7 +134,41 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub async fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
+    pub async fn query(&self, mut query_parameters: QueryEntry) -> Result<u64, ReductError> {
+        self.exclude_removed_meta_records(&mut query_parameters);
+
+        self.query_raw(query_parameters).await
+    }
+
+    fn exclude_removed_meta_records(&self, query_parameters: &mut QueryEntry) {
+        if !is_system_meta_entry(&self.name) {
+            return;
+        }
+
+        // Tombstones (and the older versions marked with them) are retained for
+        // replication and direct timestamp reads, but are not attachments.
+        let exclude = json!([{
+            "$and": [
+                {"$has": "remove"}, {"&remove": {"$eq": true}}
+            ]
+        }]);
+
+        let when = query_parameters.when.get_or_insert_with(|| json!({}));
+        match when.as_object_mut().unwrap().entry("$not") {
+            serde_json::map::Entry::Vacant(entry) => {
+                entry.insert(exclude);
+            }
+            serde_json::map::Entry::Occupied(mut entry) => {
+                entry
+                    .get_mut()
+                    .as_array_mut()
+                    .unwrap()
+                    .push(exclude.get(0).unwrap().clone());
+            }
+        }
+    }
+
+    pub(super) async fn query_raw(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
         let (start, stop) = self.get_query_time_range(&query_parameters).await?;
         let id = next_query_id();
         let block_manager = Arc::clone(&self.block_manager);
