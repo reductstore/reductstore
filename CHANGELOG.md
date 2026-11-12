@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Skip publication cycle for clean entry compaction, [PR-1704](https://github.com/reductstore/reductstore/pull/1704)
 - Hide retained attachment versions after removal so attachment listings do not expose deleted keys, [PR-1723](https://github.com/reductstore/reductstore/pull/1723)
 - Preserve acknowledged records across power loss by locally syncing publication batches and recovering valid WAL prefixes, [PR-1722](https://github.com/reductstore/reductstore/pull/1722)
 - Prevent replica index refreshes from blocking unrelated cached file reads, [PR-1713](https://github.com/reductstore/reductstore/pull/1713)
