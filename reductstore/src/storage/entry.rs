@@ -404,6 +404,9 @@ impl Entry {
         if bm.has_pending_wal().await? {
             return Ok(true);
         }
+        if self.publication.has_pending_batch() {
+            return Ok(true);
+        }
         Ok(!self
             .file_cache
             .try_exists(&self.path.join(".publication"))

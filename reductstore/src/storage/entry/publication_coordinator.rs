@@ -84,6 +84,13 @@ impl PublicationCoordinator {
         })
     }
 
+    pub(super) fn has_pending_batch(&self) -> bool {
+        match self.batch.try_lock() {
+            Ok(batch) => batch.is_some(),
+            Err(_) => true,
+        }
+    }
+
     pub(super) async fn try_publish(&self, path: &Path) -> Result<bool, ReductError> {
         let Ok(_publisher) = self.publisher.try_lock() else {
             return Ok(false);
@@ -631,5 +638,18 @@ mod tests {
             load(&path, &file_cache).await.unwrap().unwrap().state,
             PublicationState::Ready
         );
+    }
+
+    #[tokio::test]
+    async fn has_pending_batch_reflects_open_mutation_batch() {
+        let file_cache = build_test_file_cache();
+        let coordinator = PublicationCoordinator::new_with_cache(file_cache);
+        let path = entry_path();
+        assert!(!coordinator.has_pending_batch());
+        let admission = coordinator.begin_mutation(&path).await.unwrap();
+        assert!(coordinator.has_pending_batch());
+        drop(admission);
+        coordinator.publish(&path).await.unwrap();
+        assert!(!coordinator.has_pending_batch());
     }
 }
