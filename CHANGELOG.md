@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reduce memory usage when reading compressed blocks by streaming decompression, [#1728](https://github.com/reductstore/reductstore/pull/1728)
 - Avoid loading older blocks when updating labels of missing records, [PR-1726](https://github.com/reductstore/reductstore/pull/1726)
 
 ## 1.21.5 - 2026-10-27
