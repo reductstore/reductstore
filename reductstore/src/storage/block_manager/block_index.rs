@@ -6,7 +6,7 @@ use crc64fast::Digest;
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 
@@ -18,11 +18,16 @@ use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
 };
 
+type BlockId = u64;
+type Timestamp = u64;
+type LastRecordIndex = BTreeMap<BlockId, Timestamp>;
+
 #[derive(Debug)]
 pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
-    index_info: HashMap<u64, BlockEntry>,
-    index: BTreeSet<u64>,
+    index_info: HashMap<BlockId, BlockEntry>,
+    index: BTreeSet<BlockId>,
+    last_record_index: LastRecordIndex,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -88,6 +93,7 @@ impl BlockIndex {
             path_buf,
             index_info: HashMap::new(),
             index: BTreeSet::new(),
+            last_record_index: BTreeMap::new(),
         };
 
         index
@@ -135,6 +141,7 @@ impl BlockIndex {
     pub fn remove_block(&mut self, block_id: u64) -> Option<BlockEntry> {
         let block = self.index_info.remove(&block_id);
         self.index.remove(&block_id);
+        self.last_record_index.remove(&block_id);
 
         block
     }
@@ -216,6 +223,7 @@ impl BlockIndex {
             path_buf: path.clone(),
             index_info: HashMap::new(),
             index: BTreeSet::new(),
+            last_record_index: BTreeMap::new(),
         };
 
         let mut crc = Digest::new();
@@ -240,8 +248,7 @@ impl BlockIndex {
                 crc.write(&version.to_be_bytes());
             }
 
-            block_index.index.insert(block.block_id);
-            block_index.index_info.insert(block.block_id, block);
+            block_index.insert(block);
         });
 
         if crc.sum64() != value.crc64 {
@@ -365,8 +372,18 @@ impl BlockIndex {
         }
     }
 
-    pub fn tree(&self) -> &BTreeSet<u64> {
+    pub fn block_ids(&self) -> &BTreeSet<u64> {
         &self.index
+    }
+
+    pub fn last_record_index(&self) -> &BTreeMap<u64, u64> {
+        &self.last_record_index
+    }
+
+    pub fn update_latest_record_time(&mut self, block_id: u64, time: u64) {
+        // This is a lookup bound, not persisted metadata; the descriptor and index
+        // are written together later by save_meta_on_disk.
+        self.last_record_index.insert(block_id, time);
     }
 
     pub fn info(&self) -> &HashMap<u64, BlockEntry> {
@@ -382,8 +399,11 @@ impl BlockIndex {
     }
 
     fn insert(&mut self, block: BlockEntry) {
-        self.index_info.insert(block.block_id, block);
-        self.index.insert(block.block_id);
+        let block_id = block.block_id;
+        let latest = ts_to_us(block.latest_record_time.as_ref().unwrap());
+        self.index_info.insert(block_id, block);
+        self.index.insert(block_id);
+        self.last_record_index.insert(block_id, latest);
     }
 }
 
@@ -398,6 +418,39 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn lookup_bound_tracks_blocks_without_changing_persisted_metadata() {
+        let mut index = BlockIndex::new(PathBuf::from("index"));
+        index.insert_or_update(BlockEntry {
+            block_id: 10,
+            latest_record_time: Some(us_to_ts(&10)),
+            ..Default::default()
+        });
+        assert_eq!(index.last_record_index().get(&10), Some(&10));
+
+        index.update_latest_record_time(10, 40);
+        assert_eq!(index.last_record_index().get(&10), Some(&40));
+        assert_eq!(
+            index
+                .get_block(10)
+                .unwrap()
+                .latest_record_time
+                .as_ref()
+                .map(ts_to_us),
+            Some(10)
+        );
+
+        index.insert_or_update(BlockEntry {
+            block_id: 10,
+            latest_record_time: Some(us_to_ts(&20)),
+            ..Default::default()
+        });
+        assert_eq!(index.last_record_index().get(&10), Some(&20));
+
+        index.remove_block(10);
+        assert!(!index.last_record_index().contains_key(&10));
+    }
 
     mod try_load {
         use super::*;
@@ -426,7 +479,8 @@ mod tests {
             let block_index = BlockIndex::try_load(path.clone()).await.unwrap();
             assert_eq!(block_index.size(), 2);
             assert_eq!(block_index.record_count(), 1);
-            assert_eq!(block_index.tree().len(), 1);
+            assert_eq!(block_index.block_ids().len(), 1);
+            assert_eq!(block_index.last_record_index().get(&1), Some(&0));
             assert_eq!(block_index.path_buf, path);
         }
 
@@ -506,7 +560,7 @@ mod tests {
             let block_index_proto = BlockIndex::try_load(path.clone()).await.unwrap();
             assert_eq!(block_index_proto.size(), 2);
             assert_eq!(block_index_proto.record_count(), 1);
-            assert_eq!(block_index_proto.tree().len(), 1);
+            assert_eq!(block_index_proto.block_ids().len(), 1);
         }
 
         #[rstest]
