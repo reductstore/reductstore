@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::*;
+use reduct_base::not_found;
 
 impl BlockManager {
     pub async fn find_block_candidate(&mut self, start: u64) -> Result<BlockRef, ReductError> {
@@ -17,45 +18,52 @@ impl BlockManager {
         let block_ref = self.find_block_candidate(time).await?;
         let (block_id, has_record) = {
             let block = block_ref.read().await?;
-            (block.block_id(), block.get_record(time).is_some())
+            (block.block_id(), block.has_record(time))
         };
 
         if has_record {
             return Ok(block_ref);
         }
 
-        // search for a block with belated data
+        // Only load predecessors whose persisted or live range can contain the record.
         let block_ids = self
             .block_index
-            .active_tree()
+            .last_record_index()
             .range(..block_id)
             .rev()
-            .copied()
+            .filter_map(|(&id, &latest)| {
+                (!self.block_index.is_corrupted(id)
+                    && (time <= latest || self.block_cache.get_read(&id).is_some()))
+                .then_some(id)
+            })
             .collect::<Vec<_>>();
 
         for block_id in block_ids {
             let block_ref = self.load_block(block_id).await?;
-            if block_ref.read().await?.get_record(time).is_some() {
+            let block = block_ref.read().await?;
+
+            if block.has_record(time) {
+                drop(block);
                 return Ok(block_ref);
             }
         }
 
-        Ok(block_ref)
+        Err(not_found!("Record ts={} not found", time))
     }
 
     fn find_block_id(&self, start: u64) -> Result<u64, ReductError> {
-        let active_tree = self.block_index.active_tree();
-        let start_block_id = active_tree.range(start..).next();
-        if start_block_id.is_some() && start >= *start_block_id.unwrap() {
-            Ok(*start_block_id.unwrap())
-        } else if let Some(block_id) = active_tree.range(..start).rev().next() {
-            Ok(*block_id)
-        } else {
-            Err(ReductError::not_found(&format!(
-                "Record {} not found in entry {}/{}",
-                start, self.bucket, self.entry
-            )))
-        }
+        self.block_index
+            .block_ids()
+            .range(..=start)
+            .rev()
+            .find(|&&id| !self.block_index.is_corrupted(id))
+            .copied()
+            .ok_or_else(|| {
+                ReductError::not_found(&format!(
+                    "Record {} not found in entry {}/{}",
+                    start, self.bucket, self.entry
+                ))
+            })
     }
 
     pub fn find_cached_block(&self, start: u64) -> Option<BlockRef> {
