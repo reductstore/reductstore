@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Update Rust dependencies, [PR-TBD](https://github.com/reductstore/reductstore/pull/PR-TBD)
+- Update Rust dependencies, [PR-1729](https://github.com/reductstore/reductstore/pull/1729)
 
 ## 1.21.5 - 2026-10-27
 
