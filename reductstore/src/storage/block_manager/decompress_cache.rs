@@ -7,9 +7,9 @@ use crate::core::sync::AsyncRwLock;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::hash_map::DefaultHasher;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
-use std::io::{Read, SeekFrom, Write};
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -114,21 +114,7 @@ impl DecompressCache {
         file_type: DecompressedFileType,
         compressed_path: &PathBuf,
     ) -> Result<PathBuf, ReductError> {
-        let mut compressed = vec![];
-        {
-            let mut file = FILE_CACHE.read(compressed_path, SeekFrom::Start(0)).await?;
-            file.read_to_end(&mut compressed).map_err(|err| {
-                internal_server_error!(
-                    "Failed to read compressed file {:?}: {}",
-                    compressed_path,
-                    err
-                )
-            })?;
-        }
-
-        let decompressed = zstd::decode_all(compressed.as_slice()).map_err(|err| {
-            internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
-        })?;
+        let mut compressed = FILE_CACHE.read(compressed_path, SeekFrom::Start(0)).await?;
 
         std::fs::create_dir_all(&self.temp_dir).map_err(|err| {
             internal_server_error!(
@@ -139,33 +125,32 @@ impl DecompressCache {
         })?;
 
         let temp_path = self.temp_path(entry_path, block_id, file_type);
-        let mut temp_file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .read(true)
-            .open(&temp_path)
-            .map_err(|err| {
-                internal_server_error!(
-                    "Failed to create decompressed temporary file {:?}: {}",
-                    temp_path,
-                    err
-                )
-            })?;
-        temp_file.write_all(&decompressed).map_err(|err| {
-            internal_server_error!(
-                "Failed to write decompressed temporary file {:?}: {}",
-                temp_path,
-                err
-            )
-        })?;
-        temp_file.sync_all().map_err(|err| {
-            internal_server_error!(
-                "Failed to sync decompressed temporary file {:?}: {}",
-                temp_path,
-                err
-            )
-        })?;
+        let result = {
+            let mut temp_file = Self::create_temp_file(&temp_path)?;
+
+            zstd::stream::copy_decode(&mut *compressed, &mut temp_file)
+                .map_err(|err| {
+                    internal_server_error!(
+                        "Failed to decompress file {:?}: {}",
+                        compressed_path,
+                        err
+                    )
+                })
+                .and_then(|_| {
+                    temp_file.sync_all().map_err(|err| {
+                        internal_server_error!(
+                            "Failed to sync decompressed temporary file {:?}: {}",
+                            temp_path,
+                            err
+                        )
+                    })
+                })
+        };
+
+        if let Err(err) = result {
+            cleanup_tmp(&temp_path);
+            return Err(err);
+        }
 
         Ok(temp_path)
     }
@@ -207,6 +192,22 @@ impl DecompressCache {
             file_type.as_extension()
         ))
     }
+
+    fn create_temp_file(path: &Path) -> Result<File, ReductError> {
+        OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .read(true)
+            .open(path)
+            .map_err(|err| {
+                internal_server_error!(
+                    "Failed to create decompressed temporary file {:?}: {}",
+                    path,
+                    err
+                )
+            })
+    }
 }
 
 impl Drop for DecompressCache {
@@ -232,6 +233,18 @@ mod tests {
     use serial_test::serial;
     use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_create_temp_file_rejects_directory() {
+        let dir = tempdir().unwrap();
+
+        let err = DecompressCache::create_temp_file(dir.path()).unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err
+            .message()
+            .contains("Failed to create decompressed temporary file"));
+    }
 
     #[tokio::test]
     #[serial]
@@ -261,6 +274,27 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn test_get_or_decompress_streams_large_block() {
+        let dir = tempdir().unwrap().keep();
+        let compressed_path = dir.join("1.blk.zst");
+        let data = vec![42; 1024 * 1024];
+        std::fs::write(
+            &compressed_path,
+            zstd::encode_all(data.as_slice(), 3).unwrap(),
+        )
+        .unwrap();
+        let cache = DecompressCache::new(64, Duration::from_secs(30));
+
+        let path = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(path).unwrap(), data);
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn test_get_or_decompress_with_corrupted_data_returns_error() {
         let dir = tempdir().unwrap().keep();
         let compressed_path = dir.join("1.blk.zst");
@@ -273,6 +307,26 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert_eq!(std::fs::read_dir(&cache.temp_dir).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_or_decompress_removes_partial_file_on_error() {
+        let dir = tempdir().unwrap().keep();
+        let compressed_path = dir.join("1.blk.zst");
+        let mut compressed = zstd::encode_all(vec![42; 1024 * 1024].as_slice(), 3).unwrap();
+        compressed.truncate(compressed.len() - 1);
+        std::fs::write(&compressed_path, compressed).unwrap();
+        let cache = DecompressCache::new(64, Duration::from_secs(30));
+
+        let err = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert_eq!(std::fs::read_dir(&cache.temp_dir).unwrap().count(), 0);
     }
 
     #[tokio::test]
