@@ -254,6 +254,17 @@ impl Entry {
                             );
                         }
                     }
+                    Err(e) if e.status() == ErrorCode::NotFound => {
+                        error_map.insert(
+                            time,
+                            not_found!(
+                                "Record {} not found in entry {}/{}",
+                                time,
+                                bucket_name,
+                                entry_name
+                            ),
+                        );
+                    }
                     Err(e) => {
                         error_map.insert(time, e);
                     }

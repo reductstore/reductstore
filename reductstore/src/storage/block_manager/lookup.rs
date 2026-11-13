@@ -48,7 +48,13 @@ impl BlockManager {
             }
         }
 
-        Err(not_found!("Record ts={} not found", time))
+        Err(not_found!(
+            "Record {} not found in block {}/{}/{}",
+            time,
+            self.bucket,
+            self.entry,
+            block_id
+        ))
     }
 
     fn find_block_id(&self, start: u64) -> Result<u64, ReductError> {
@@ -218,10 +224,72 @@ mod tests {
     use super::*;
     use crate::storage::block_manager::test_utils::{block_id, block_manager};
     use crate::storage::block_manager::BlockManager;
-    use crate::storage::proto::Block as BlockProto;
+    use crate::storage::proto::{Block as BlockProto, Record};
     use prost::Message;
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
+
+    fn record(time: u64) -> Record {
+        Record {
+            timestamp: Some(us_to_ts(&time)),
+            begin: 0,
+            end: 1,
+            state: 1,
+            labels: vec![],
+            content_type: String::new(),
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn missing_record_skips_predecessor_descriptors(#[future] block_manager: BlockManager) {
+        let mut bm = block_manager.await;
+        let older = bm.start_new_block(10, 1024).await.unwrap();
+        bm.save_meta_on_disk(older).await.unwrap();
+        bm.start_new_block(20, 1024).await.unwrap();
+        bm.block_cache.remove(&10);
+        FILE_CACHE.remove(&bm.path_to_desc(10)).await.unwrap();
+
+        let err = bm.find_block_with_record(21).await.err().unwrap();
+        assert_eq!(err.status(), ErrorCode::NotFound);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn finds_record_in_older_overlapping_block(#[future] block_manager: BlockManager) {
+        let mut bm = block_manager.await;
+        let older = bm.start_new_block(10, 1024).await.unwrap();
+        older
+            .write()
+            .await
+            .unwrap()
+            .insert_or_update_record(record(40));
+        bm.save_meta_on_disk(older).await.unwrap();
+        bm.start_new_block(30, 1024).await.unwrap();
+
+        let found = bm.find_block_with_record(40).await.unwrap();
+        assert_eq!(found.read().await.unwrap().block_id(), 10);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn finds_record_in_cached_block_with_stale_index(#[future] block_manager: BlockManager) {
+        let mut bm = block_manager.await;
+        let older = bm.start_new_block(10, 1024).await.unwrap();
+        bm.start_new_block(30, 1024).await.unwrap();
+        older
+            .write()
+            .await
+            .unwrap()
+            .insert_or_update_record(record(40));
+        assert_eq!(bm.index().last_record_index().get(&10), Some(&0));
+
+        let found = bm.find_block_with_record(40).await.unwrap();
+        assert_eq!(found.read().await.unwrap().block_id(), 10);
+
+        bm.save_block(older).await.unwrap();
+        assert_eq!(bm.index().last_record_index().get(&10), Some(&40));
+    }
 
     #[rstest]
     #[tokio::test]

@@ -419,6 +419,32 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn lookup_bound_tracks_blocks_without_changing_persisted_metadata() {
+        let mut index = BlockIndex::new(PathBuf::from("index"));
+        index.insert_or_update(BlockEntry {
+            block_id: 10,
+            latest_record_time: Some(us_to_ts(&10)),
+            ..Default::default()
+        });
+        assert_eq!(index.last_record_index().get(&10), Some(&10));
+
+        index.update_latest_record_time(10, 40);
+        assert_eq!(index.last_record_index().get(&10), Some(&40));
+        assert_eq!(
+            index
+                .get_block(10)
+                .unwrap()
+                .latest_record_time
+                .as_ref()
+                .map(ts_to_us),
+            Some(10)
+        );
+
+        index.remove_block(10);
+        assert!(!index.last_record_index().contains_key(&10));
+    }
+
     mod try_load {
         use super::*;
 
