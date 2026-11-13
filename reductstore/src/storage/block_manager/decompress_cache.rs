@@ -7,7 +7,7 @@ use crate::core::sync::AsyncRwLock;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::hash_map::DefaultHasher;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
@@ -126,19 +126,7 @@ impl DecompressCache {
 
         let temp_path = self.temp_path(entry_path, block_id, file_type);
         let result = {
-            let mut temp_file = OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
-                .read(true)
-                .open(&temp_path)
-                .map_err(|err| {
-                    internal_server_error!(
-                        "Failed to create decompressed temporary file {:?}: {}",
-                        temp_path,
-                        err
-                    )
-                })?;
+            let mut temp_file = Self::create_temp_file(&temp_path)?;
 
             zstd::stream::copy_decode(&mut *compressed, &mut temp_file)
                 .map_err(|err| {
@@ -204,6 +192,22 @@ impl DecompressCache {
             file_type.as_extension()
         ))
     }
+
+    fn create_temp_file(path: &Path) -> Result<File, ReductError> {
+        OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .read(true)
+            .open(path)
+            .map_err(|err| {
+                internal_server_error!(
+                    "Failed to create decompressed temporary file {:?}: {}",
+                    path,
+                    err
+                )
+            })
+    }
 }
 
 impl Drop for DecompressCache {
@@ -229,6 +233,18 @@ mod tests {
     use serial_test::serial;
     use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_create_temp_file_rejects_directory() {
+        let dir = tempdir().unwrap();
+
+        let err = DecompressCache::create_temp_file(dir.path()).unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err
+            .message()
+            .contains("Failed to create decompressed temporary file"));
+    }
 
     #[tokio::test]
     #[serial]
