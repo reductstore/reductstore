@@ -441,6 +441,13 @@ mod tests {
             Some(10)
         );
 
+        index.insert_or_update(BlockEntry {
+            block_id: 10,
+            latest_record_time: Some(us_to_ts(&20)),
+            ..Default::default()
+        });
+        assert_eq!(index.last_record_index().get(&10), Some(&20));
+
         index.remove_block(10);
         assert!(!index.last_record_index().contains_key(&10));
     }
@@ -473,6 +480,7 @@ mod tests {
             assert_eq!(block_index.size(), 2);
             assert_eq!(block_index.record_count(), 1);
             assert_eq!(block_index.block_ids().len(), 1);
+            assert_eq!(block_index.last_record_index().get(&1), Some(&0));
             assert_eq!(block_index.path_buf, path);
         }
 

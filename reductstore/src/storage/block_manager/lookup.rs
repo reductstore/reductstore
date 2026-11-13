@@ -227,7 +227,15 @@ mod tests {
     use crate::storage::proto::{Block as BlockProto, Record};
     use prost::Message;
     use reduct_base::error::ErrorCode;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
+
+    #[fixture]
+    async fn predecessor_blocks(#[future] block_manager: BlockManager) -> (BlockManager, BlockRef) {
+        let mut bm = block_manager.await;
+        let older = bm.start_new_block(10, 1024).await.unwrap();
+        bm.start_new_block(30, 1024).await.unwrap();
+        (bm, older)
+    }
 
     fn record(time: u64) -> Record {
         Record {
@@ -241,31 +249,43 @@ mod tests {
     }
 
     #[rstest]
+    #[case(false)]
+    #[case(true)]
     #[tokio::test]
-    async fn missing_record_skips_predecessor_descriptors(#[future] block_manager: BlockManager) {
-        let mut bm = block_manager.await;
-        let older = bm.start_new_block(10, 1024).await.unwrap();
+    async fn missing_record_skips_predecessor_descriptors(
+        #[future] predecessor_blocks: (BlockManager, BlockRef),
+        #[case] corrupted: bool,
+    ) {
+        let (mut bm, older) = predecessor_blocks.await;
+        older
+            .write()
+            .await
+            .unwrap()
+            .insert_or_update_record(record(if corrupted { 40 } else { 12 }));
         bm.save_meta_on_disk(older).await.unwrap();
-        bm.start_new_block(20, 1024).await.unwrap();
+        if corrupted {
+            bm.mark_block_corrupted(10).await.unwrap();
+        }
         bm.block_cache.remove(&10);
         FILE_CACHE.remove(&bm.path_to_desc(10)).await.unwrap();
 
-        let err = bm.find_block_with_record(21).await.err().unwrap();
+        let err = bm.find_block_with_record(31).await.err().unwrap();
         assert_eq!(err.status(), ErrorCode::NotFound);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn finds_record_in_older_overlapping_block(#[future] block_manager: BlockManager) {
-        let mut bm = block_manager.await;
-        let older = bm.start_new_block(10, 1024).await.unwrap();
+    async fn finds_record_in_older_overlapping_block(
+        #[future] predecessor_blocks: (BlockManager, BlockRef),
+    ) {
+        let (mut bm, older) = predecessor_blocks.await;
         older
             .write()
             .await
             .unwrap()
             .insert_or_update_record(record(40));
         bm.save_meta_on_disk(older).await.unwrap();
-        bm.start_new_block(30, 1024).await.unwrap();
+        bm.block_cache.remove(&10);
 
         let found = bm.find_block_with_record(40).await.unwrap();
         assert_eq!(found.read().await.unwrap().block_id(), 10);
@@ -273,10 +293,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn finds_record_in_cached_block_with_stale_index(#[future] block_manager: BlockManager) {
-        let mut bm = block_manager.await;
-        let older = bm.start_new_block(10, 1024).await.unwrap();
-        bm.start_new_block(30, 1024).await.unwrap();
+    async fn finds_record_in_cached_block_with_stale_index(
+        #[future] predecessor_blocks: (BlockManager, BlockRef),
+    ) {
+        let (mut bm, older) = predecessor_blocks.await;
         older
             .write()
             .await
