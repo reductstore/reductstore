@@ -116,6 +116,11 @@ impl Block {
         self.record_index.get(&timestamp)
     }
 
+    /// Check if a record exists by timestamp.
+    pub fn has_record(&self, timestamp: u64) -> bool {
+        self.record_index.contains_key(&timestamp)
+    }
+
     /// Remove a record by timestamp.
     ///
     /// The method removes a record by timestamp and updates the size, the record count and the metadata size.

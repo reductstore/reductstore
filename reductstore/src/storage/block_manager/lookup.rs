@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::*;
+use reduct_base::not_found;
 
 impl BlockManager {
     pub async fn find_block_candidate(&mut self, start: u64) -> Result<BlockRef, ReductError> {
@@ -17,47 +18,58 @@ impl BlockManager {
         let block_ref = self.find_block_candidate(time).await?;
         let (block_id, has_record) = {
             let block = block_ref.read().await?;
-            (block.block_id(), block.get_record(time).is_some())
+            (block.block_id(), block.has_record(time))
         };
 
         if has_record {
             return Ok(block_ref);
         }
 
-        // search for a block with belated data
+        // Only load predecessors whose persisted or live range can contain the record.
         let block_ids = self
             .block_index
-            .active_tree()
+            .last_record_index()
             .range(..block_id)
             .rev()
-            .copied()
+            .filter_map(|(&id, &latest)| {
+                (!self.block_index.is_corrupted(id)
+                    && (time <= latest || self.block_cache.get_read(&id).is_some()))
+                .then_some(id)
+            })
             .collect::<Vec<_>>();
 
         for block_id in block_ids {
             let block_ref = self.load_block(block_id).await?;
-            if block_ref.read().await?.get_record(time).is_some() {
+            let block = block_ref.read().await?;
+
+            if block.has_record(time) {
+                drop(block);
                 return Ok(block_ref);
             }
         }
 
-        Ok(block_ref)
+        Err(not_found!(
+            "Record {} not found in block {}/{}/{}",
+            time,
+            self.bucket,
+            self.entry,
+            block_id
+        ))
     }
 
     fn find_block_id(&self, start: u64) -> Result<u64, ReductError> {
-        let active_tree = self.block_index.active_tree();
-        let start_block_id = active_tree.range(start..).next();
-        if start_block_id.is_some() && start >= *start_block_id.unwrap() {
-            Ok(*start_block_id.unwrap())
-        } else if let Some(block_id) = active_tree.range(..start).rev().next() {
-            Ok(*block_id)
-        } else {
-            Err(not_found!(
-                "Record {} not found in entry {}/{}",
-                start,
-                self.bucket,
-                self.entry
-            ))
-        }
+        self.block_index
+            .block_ids()
+            .range(..=start)
+            .rev()
+            .find(|&&id| !self.block_index.is_corrupted(id))
+            .copied()
+            .ok_or_else(|| {
+                ReductError::not_found(&format!(
+                    "Record {} not found in entry {}/{}",
+                    start, self.bucket, self.entry
+                ))
+            })
     }
 
     pub fn find_cached_block(&self, start: u64) -> Option<BlockRef> {
@@ -231,12 +243,94 @@ mod tests {
     use crate::cfg::InstanceRole;
     use crate::storage::block_manager::compress::CompressionAlgorithm;
     use crate::storage::block_manager::test_utils::{block_id, block_manager};
-    use crate::storage::block_manager::BlockManager;
-    use crate::storage::proto::Block as BlockProto;
+    use crate::storage::block_manager::{BlockManager, BlockRef};
+    use crate::storage::proto::{us_to_ts, Block as BlockProto, Record};
     use prost::Message;
     use reduct_base::error::ErrorCode;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use std::sync::Arc;
+
+    #[fixture]
+    async fn predecessor_blocks(#[future] block_manager: BlockManager) -> (BlockManager, BlockRef) {
+        let mut bm = block_manager.await;
+        let older = bm.start_new_block(10, 1024).await.unwrap();
+        bm.start_new_block(30, 1024).await.unwrap();
+        (bm, older)
+    }
+
+    fn record(time: u64) -> Record {
+        Record {
+            timestamp: Some(us_to_ts(&time)),
+            begin: 0,
+            end: 1,
+            state: 1,
+            labels: vec![],
+            content_type: String::new(),
+        }
+    }
+
+    #[rstest]
+    #[case(false)]
+    #[case(true)]
+    #[tokio::test]
+    async fn missing_record_skips_predecessor_descriptors(
+        #[future] predecessor_blocks: (BlockManager, BlockRef),
+        #[case] corrupted: bool,
+    ) {
+        let (mut bm, older) = predecessor_blocks.await;
+        older
+            .write()
+            .await
+            .unwrap()
+            .insert_or_update_record(record(if corrupted { 40 } else { 12 }));
+        bm.save_meta_on_disk(older).await.unwrap();
+        if corrupted {
+            bm.mark_block_corrupted(10).await.unwrap();
+        }
+        bm.block_cache.remove(&10);
+        bm.file_cache.remove(&bm.path_to_desc(10)).await.unwrap();
+
+        let err = bm.find_block_with_record(31).await.err().unwrap();
+        assert_eq!(err.status(), ErrorCode::NotFound);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn finds_record_in_older_overlapping_block(
+        #[future] predecessor_blocks: (BlockManager, BlockRef),
+    ) {
+        let (mut bm, older) = predecessor_blocks.await;
+        older
+            .write()
+            .await
+            .unwrap()
+            .insert_or_update_record(record(40));
+        bm.save_meta_on_disk(older).await.unwrap();
+        bm.block_cache.remove(&10);
+
+        let found = bm.find_block_with_record(40).await.unwrap();
+        assert_eq!(found.read().await.unwrap().block_id(), 10);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn finds_record_in_cached_block_with_stale_index(
+        #[future] predecessor_blocks: (BlockManager, BlockRef),
+    ) {
+        let (mut bm, older) = predecessor_blocks.await;
+        older
+            .write()
+            .await
+            .unwrap()
+            .insert_or_update_record(record(40));
+        assert_eq!(bm.index().last_record_index().get(&10), Some(&0));
+
+        let found = bm.find_block_with_record(40).await.unwrap();
+        assert_eq!(found.read().await.unwrap().block_id(), 10);
+
+        bm.save_block(older).await.unwrap();
+        assert_eq!(bm.index().last_record_index().get(&10), Some(&40));
+    }
 
     #[rstest]
     #[tokio::test]

@@ -527,11 +527,11 @@ impl EntryLoader {
                         .ends_with(COMPRESSED_DESCRIPTOR_FILE_EXT))
             .count();
 
-        if number_of_descriptors != block_index.tree().len() {
+        if number_of_descriptors != block_index.block_ids().len() {
             warn!(
                 "Number of descriptors {} does not match block index {} in entry {:?}",
                 number_of_descriptors,
-                block_index.tree().len(),
+                block_index.block_ids().len(),
                 path
             );
 
@@ -548,7 +548,7 @@ impl EntryLoader {
         file_cache: &Arc<FileCache>,
     ) -> Result<(), ReductError> {
         let mut inconsistent_data = false;
-        for block_id in block_index.tree().iter() {
+        for block_id in block_index.block_ids().iter() {
             let block = block_index.get_block(*block_id).unwrap();
             let compressed = block
                 .compression
@@ -1591,7 +1591,7 @@ mod tests {
                 .await
                 .unwrap()
                 .index()
-                .tree()
+                .block_ids()
                 .len(),
             2,
             "should rebuild index and add the block"

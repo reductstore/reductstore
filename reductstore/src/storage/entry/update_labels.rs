@@ -4,7 +4,7 @@
 use crate::storage::entry::{is_system_meta_entry, Entry};
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{not_found, Labels};
 use serde_json::json;
@@ -81,6 +81,18 @@ impl Entry {
                             .get_record(time)
                             .cloned()
                             .map(|record| (block.block_id(), record))
+                    }
+                    Err(err) if err.status() == ErrorCode::NotFound => {
+                        result.insert(
+                            time,
+                            Err(not_found!(
+                                "Record {} not found in entry {}/{}",
+                                time,
+                                self.bucket_name,
+                                self.name
+                            )),
+                        );
+                        continue;
                     }
                     Err(err) => {
                         if report_result {

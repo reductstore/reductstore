@@ -320,7 +320,7 @@ impl Entry {
         let publication = self.publication.begin_mutation(&self.path).await?;
         let block_ids = {
             let block_manager = self.block_manager.read().await?;
-            Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
+            Ok::<BTreeSet<u64>, ReductError>(block_manager.index().block_ids().clone())
         };
 
         for block_id in block_ids? {
@@ -344,7 +344,7 @@ impl Entry {
 
     pub(super) async fn oldest_block(&self) -> Result<Option<(u64, u64)>, ReductError> {
         let bm = self.block_manager.read().await?;
-        let Some(block_id) = bm.index().tree().first() else {
+        let Some(block_id) = bm.index().block_ids().first() else {
             return Ok(None);
         };
         let block = bm
@@ -364,7 +364,7 @@ impl Entry {
         let mut bm = self.block_manager.write().await?;
         let oldest_block_id = *bm
             .index()
-            .tree()
+            .block_ids()
             .first()
             .ok_or_else(|| internal_server_error!("No block to remove"))?;
         let removed_size = bm
@@ -1466,7 +1466,7 @@ mod tests {
 
         let cached_info = entry.info().await.unwrap();
         let mut block_manager = entry.block_manager.write().await.unwrap();
-        let block_id = *block_manager.index().tree().first().unwrap();
+        let block_id = *block_manager.index().block_ids().first().unwrap();
         block_manager.remove_block(block_id).await.unwrap();
 
         let stale_info = tokio::time::timeout(Duration::from_millis(100), entry.info())

@@ -43,6 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Publish entry mutations atomically for read-only replicas, [PR-1637](https://github.com/reductstore/reductstore/pull/1637) by @atimin
 - Replace formatted `ReductError` constructors with error macros, [PR-1631](https://github.com/reductstore/reductstore/pull/1631) by @vintcessun
 
+## 1.21.6 - 2026-11-13
+
+### Fixed
+
+- Reduce memory usage when reading compressed blocks by streaming decompression, [PR-1728](https://github.com/reductstore/reductstore/pull/1728)
+- Avoid loading older blocks when updating labels of missing records, [PR-1726](https://github.com/reductstore/reductstore/pull/1726)
+
+### Changed
+
+- Update Rust dependencies, [PR-1729](https://github.com/reductstore/reductstore/pull/1729)
+
 ## 1.21.5 - 2026-10-27
 
 ### Fixed
