@@ -761,6 +761,56 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_when_filter_directive_strict_overrides_options_false(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let mut query = build_query(
+            0,
+            1001,
+            QueryOptions {
+                when: Some(
+                    serde_json::from_str(r##"{"#strict": true, "$and": ["&NOT_EXIST"]}"##).unwrap(),
+                ),
+                strict: false,
+                ..QueryOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            query.next(block_manager.clone()).await.err(),
+            Some(not_found!("Reference 'NOT_EXIST' not found"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_when_filter_directive_strict_overrides_options_true(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let mut query = build_query(
+            0,
+            1001,
+            QueryOptions {
+                when: Some(
+                    serde_json::from_str(r##"{"#strict": false, "$and": ["&NOT_EXIST"]}"##)
+                        .unwrap(),
+                ),
+                strict: true,
+                ..QueryOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            query.next(block_manager.clone()).await.err(),
+            Some(no_content!("No content")),
+            "directive '#strict: false' should override options.strict: true"
+        );
+    }
+
     async fn read_to_vector(
         query: &mut HistoricalQuery,
         block_manager: Arc<AsyncRwLock<BlockManager>>,
