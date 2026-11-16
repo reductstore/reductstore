@@ -52,7 +52,7 @@ async-compression = { version = "0.4.41", features = ["tokio", "gzip", "zstd"] }
 hyper = { version = "1.10.1", features = ["full"] }
 futures-util = "0.3.31"
 futures = "0.3"
-axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+axum-server = { version = "0.9.2", features = ["tls-rustls"] }
 mime_guess = "2.0.5"
 bytesize = "2.3.1"
 async-trait = "0.1.89"
