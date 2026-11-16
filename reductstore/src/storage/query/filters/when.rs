@@ -49,12 +49,7 @@ impl<R> WhenFilter<R> {
                         "#strict must be a single boolean value"
                     ));
                 }
-                match values.first().unwrap() {
-                    Value::Bool(val) => *val,
-                    _ => {
-                        return Err(unprocessable_entity!("#strict must be a boolean"));
-                    }
-                }
+                values.first().unwrap().as_bool()?
             }
             None => strict,
         };
@@ -452,11 +447,28 @@ mod tests {
                 IoConfig::default(),
                 true,
             );
-            assert!(result.is_err());
-            assert_eq!(
-                result.err().unwrap().to_string(),
-                "[UnprocessableEntity] #strict must be a boolean"
+            // The value is coerced like any condition value: a non-empty string is truthy
+            assert!(result.is_ok());
+            assert!(result.unwrap().strict());
+        }
+
+        #[rstest]
+        fn test_strict_directive_zero_is_falsy() {
+            let parser = Parser::new();
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#strict": 0,
+                    "$and": [true]
+                }))
+                .unwrap();
+            let result = WhenFilter::<TestFilterRecord>::try_new(
+                condition,
+                directives,
+                IoConfig::default(),
+                true,
             );
+            assert!(result.is_ok());
+            assert!(!result.unwrap().strict());
         }
 
         #[rstest]
