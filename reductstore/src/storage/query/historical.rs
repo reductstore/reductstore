@@ -14,9 +14,10 @@ use crate::storage::query::filters::{
     WhenFilter,
 };
 use async_trait::async_trait;
-use log::debug;
+use log::{debug, warn};
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
+use std::cmp::max;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
@@ -55,13 +56,9 @@ pub struct HistoricalQuery {
     /// Entry name
     entry_name: String,
     /// The records from the current block that have not been read yet.
-    records_from_current_block: VecDeque<Record>,
-    /// Records from overlapping blocks, ordered across all participating blocks.
-    records_from_overlapping_blocks: VecDeque<(BlockRef, Record)>,
-    /// Whether the query spans overlapping blocks.
-    has_overlapping_blocks: bool,
+    records_from_current_blocks: VecDeque<(usize, Record)>,
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
-    current_block: Option<BlockRef>,
+    current_blocks: Vec<BlockRef>,
     /// Filters
     filters: Vec<Filter>,
     /// Request only metadata without the content.
@@ -111,10 +108,8 @@ impl HistoricalQuery {
             entry_name,
             start_time,
             stop_time,
-            records_from_current_block: VecDeque::new(),
-            records_from_overlapping_blocks: VecDeque::new(),
-            has_overlapping_blocks: false,
-            current_block: None,
+            records_from_current_blocks: VecDeque::new(),
+            current_blocks: Vec::new(),
             filters,
             only_metadata,
             is_interrupted: false,
@@ -129,57 +124,55 @@ impl Query for HistoricalQuery {
         &mut self,
         block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        if self.records_from_current_block.is_empty()
-            && !self.has_overlapping_blocks
-            && !self.is_interrupted
-        {
-            let start = if let Some(block) = &self.current_block {
-                let block = block.read().await?;
-                block.latest_record_time()
-            } else {
-                self.start_time
-            };
+        if self.records_from_current_blocks.is_empty() && !self.is_interrupted {
+            assert!(self.current_blocks.is_empty());
+            let start = self.start_time;
 
-            let block_range = {
-                let mut bm = block_manager.write().await?;
-                let first_block = match bm.find_block_candidate(start).await {
-                    Ok(block) => block.read().await?.block_id(),
-                    Err(err) if err.status() == ErrorCode::TooEarly => {
-                        debug!(
+            let block_candidates = {
+                let first_block = {
+                    let mut bm = block_manager.write().await?;
+                    match bm.find_block_candidate(start).await {
+                        Ok(block) => block.read().await?.block_id(),
+                        Err(err) if err.status() == ErrorCode::TooEarly => {
+                            debug!(
                             "Skip query start block lookup for '{}' due to transient replica state: {}",
                             self.entry_name, err
                         );
-                        0
+                            0
+                        }
+                        Err(_) => 0,
                     }
-                    Err(_) => 0,
                 };
-                if first_block > self.stop_time {
-                    Vec::new()
-                } else {
+
+                let mut bm = block_manager.read().await?;
+                let mut block_candidates = Vec::new();
+                if first_block <= self.stop_time {
                     let active_tree = bm.index().active_tree();
-                    self.has_overlapping_blocks = active_tree
-                        .iter()
-                        .zip(active_tree.iter().skip(1))
-                        .any(|(block_id, next_block_id)| {
-                            bm.index()
-                                .get_block(*block_id)
-                                .and_then(|block| block.latest_record_time.as_ref())
-                                .is_some_and(|latest| ts_to_us(latest) > *next_block_id)
-                        });
-                    let range_start = if self.has_overlapping_blocks {
-                        0
-                    } else {
-                        first_block
-                    };
-                    active_tree
-                        .range(range_start..self.stop_time)
-                        .copied()
-                        .collect::<Vec<u64>>()
+                    let last_timestamp_index = bm.index().last_record_index();
+
+                    let block_range: Vec<_> = active_tree
+                        .range(first_block..=self.stop_time)
+                        .cloned()
+                        .collect();
+                    for block_id in block_range {
+                        // store the first block candidate to start reading from
+                        if block_candidates.is_empty() {
+                            block_candidates.push(block_id);
+                            continue;
+                        }
+
+                        // check for overlapping blocks by comparing the last record timestamp of the previous block with the current block id
+                        if last_timestamp_index.get(&block_id).unwrap()
+                            > &block_candidates.last().unwrap()
+                        {
+                            block_candidates.push(block_id);
+                        }
+                    }
                 }
+                block_candidates
             };
 
-            let mut overlapping_records = Vec::new();
-            for block_id in block_range {
+            for block_id in block_candidates {
                 let mut bm = block_manager.write().await?;
                 let block_result = match bm.find_cached_block(block_id) {
                     Some(block_ref) => Ok(block_ref),
@@ -204,70 +197,27 @@ impl Query for HistoricalQuery {
                     Err(err) => return Err(err),
                 };
 
-                self.current_block = Some(block_ref);
-                if self.has_overlapping_blocks {
-                    let block_ref = self.current_block.as_ref().unwrap().clone();
-                    let block = block_ref.read().await?;
-                    overlapping_records.extend(
-                        block
-                            .record_index()
-                            .values()
-                            .cloned()
-                            .map(|record| (block_ref.clone(), record)),
-                    );
-                    continue;
-                }
+                self.current_blocks.push(block_ref.clone());
+                let mut found_records = self.filter_records_from_current_blocks().await?;
+                found_records.sort_by_key(|(_, rec)| ts_to_us(rec.timestamp.as_ref().unwrap()));
 
-                let mut found_records = self.filter_records_from_current_block().await?;
-                found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
-
-                self.records_from_current_block.extend(found_records);
-                if !self.records_from_current_block.is_empty() {
+                self.records_from_current_blocks.extend(found_records);
+                if !self.records_from_current_blocks.is_empty() {
                     break;
                 }
             }
-
-            if self.has_overlapping_blocks {
-                overlapping_records
-                    .sort_by_key(|(_, record)| ts_to_us(record.timestamp.as_ref().unwrap()));
-                for (block_ref, record) in overlapping_records {
-                    match apply_filters_recursively(self.filters.as_mut_slice(), vec![record], 0)? {
-                        Some(records) => self.records_from_overlapping_blocks.extend(
-                            records
-                                .into_iter()
-                                .map(|record| (block_ref.clone(), record)),
-                        ),
-                        None => {
-                            self.is_interrupted = true;
-                            break;
-                        }
-                    }
-                }
-            }
         }
 
-        if self.records_from_current_block.is_empty()
-            && self.records_from_overlapping_blocks.is_empty()
-        {
+        let Some((block_idx, record)) = self.records_from_current_blocks.pop_front() else {
             return Err(ReductError::no_content("No content"));
-        }
-
-        let (block, record) = self
-            .records_from_overlapping_blocks
-            .pop_front()
-            .unwrap_or_else(|| {
-                (
-                    self.current_block.as_ref().unwrap().clone(),
-                    self.records_from_current_block.pop_front().unwrap(),
-                )
-            });
+        };
 
         if self.only_metadata {
             Ok(RecordReader::form_record(&self.entry_name, record))
         } else {
             RecordReader::try_new(
                 Arc::clone(&block_manager),
-                block,
+                self.current_blocks.get(block_idx).unwrap().clone(),
                 ts_to_us(&record.timestamp.unwrap()),
                 Some(record),
                 None,
@@ -282,19 +232,32 @@ impl Query for HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    async fn filter_records_from_current_block(&mut self) -> Result<Vec<Record>, ReductError> {
-        let block = self.current_block.as_ref().unwrap().read().await?;
+    async fn filter_records_from_current_blocks(
+        &mut self,
+    ) -> Result<Vec<(usize, Record)>, ReductError> {
         let mut filtered_records = Vec::new();
-        for record in block.record_index().values() {
-            match apply_filters_recursively(self.filters.as_mut_slice(), vec![record.clone()], 0)? {
-                Some(records) => {
-                    filtered_records.extend(records);
+        for (block_id, block) in self.current_blocks.iter().enumerate() {
+            for record in block.read().await?.record_index().values() {
+                match apply_filters_recursively(
+                    self.filters.as_mut_slice(),
+                    vec![record.clone()],
+                    0,
+                )? {
+                    Some(records) => {
+                        for record in records {
+                            filtered_records.push((block_id, record));
+                        }
+                    }
+                    None => {
+                        // If the filtering is interrupted, we stop processing further records.
+                        self.is_interrupted = true;
+                        break;
+                    }
                 }
-                None => {
-                    // If the filtering is interrupted, we stop processing further records.
-                    self.is_interrupted = true;
-                    break;
-                }
+            }
+
+            if self.is_interrupted {
+                break;
             }
         }
 
