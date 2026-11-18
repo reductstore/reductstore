@@ -119,6 +119,113 @@ impl HistoricalQuery {
             io_config,
         })
     }
+
+    async fn get_records_from_nearest_overlapped_blocks(
+        &mut self,
+        block_manager: &Arc<AsyncRwLock<BlockManager>>,
+    ) -> Result<bool, ReductError> {
+        self.block_candidates.clear();
+        let block_candidate_ids = {
+            let first_block = if let Some(last_id) = self.last_scanned_block_id {
+                let bm = block_manager.read().await?;
+                match bm
+                    .index()
+                    .active_tree()
+                    .range((Excluded(last_id), Unbounded))
+                    .next()
+                    .copied()
+                {
+                    Some(id) if id < self.stop_time => id,
+                    _ => return Err(ReductError::no_content("No content")),
+                }
+            } else {
+                let mut bm = block_manager.write().await?;
+                match bm.find_block_candidate(self.start_time).await {
+                    Ok(block) => block.read().await?.block_id(),
+                    Err(err) if err.status() == ErrorCode::TooEarly => {
+                        debug!(
+                            "Skip query start block lookup for '{}' due to transient replica state: {}",
+                            self.entry_name, err
+                        );
+                        0
+                    }
+                    Err(_) => 0,
+                }
+            };
+
+            let bm = block_manager.read().await?;
+            let mut block_candidates = Vec::new();
+            if first_block < self.stop_time {
+                let active_tree = bm.index().active_tree();
+                let last_timestamp_index = bm.index().last_record_index();
+
+                let block_range: Vec<_> = active_tree
+                    .range(first_block..=self.stop_time)
+                    .cloned()
+                    .collect();
+                let mut group_end = 0;
+                for block_id in block_range {
+                    // store the first block candidate to start reading from
+                    if block_candidates.is_empty() {
+                        block_candidates.push(block_id);
+                        group_end = *last_timestamp_index.get(&block_id).unwrap();
+                        continue;
+                    }
+
+                    if group_end > block_id {
+                        block_candidates.push(block_id);
+                        group_end = group_end.max(*last_timestamp_index.get(&block_id).unwrap());
+                    } else {
+                        break;
+                    }
+                }
+            }
+            block_candidates
+        };
+
+        if block_candidate_ids.is_empty() {
+            return Err(ReductError::no_content("No content"));
+        }
+
+        let mut block_candidates = Vec::new();
+        for block_id in block_candidate_ids {
+            let mut bm = block_manager.write().await?;
+            let block_result = match bm.find_cached_block(block_id) {
+                Some(block_ref) => Ok(block_ref),
+                None => bm.load_block(block_id).await,
+            };
+            let block_ref = match block_result {
+                Ok(block_ref) => block_ref,
+                Err(err) if err.status() == ErrorCode::TooEarly => {
+                    debug!(
+                        "Skip transient replica block {} for query '{}': {}",
+                        block_id, self.entry_name, err
+                    );
+                    return Err(ReductError::no_content("No content"));
+                }
+                Err(err) if err.status() == ErrorCode::NotFound => {
+                    debug!(
+                        "Skip stale block {} for query '{}': {}",
+                        block_id, self.entry_name, err
+                    );
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
+
+            block_candidates.push(block_ref);
+        }
+
+        if let Some(block) = block_candidates.last() {
+            self.last_scanned_block_id = Some(block.read().await?.block_id())
+        }
+
+        let found_records = self.filter_records_from_blocks(&block_candidates).await?;
+        self.records_from_current_blocks.extend(found_records);
+        self.block_candidates = block_candidates;
+
+        Ok(!self.records_from_current_blocks.is_empty())
+    }
 }
 
 #[async_trait]
@@ -128,105 +235,12 @@ impl Query for HistoricalQuery {
         block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         if self.records_from_current_blocks.is_empty() && !self.is_interrupted {
-            self.block_candidates.clear();
-            let block_candidate_ids = {
-                let first_block = if let Some(last_id) = self.last_scanned_block_id {
-                    let bm = block_manager.read().await?;
-                    match bm
-                        .index()
-                        .active_tree()
-                        .range((Excluded(last_id), Unbounded))
-                        .next()
-                        .copied()
-                    {
-                        Some(id) if id < self.stop_time => id,
-                        _ => return Err(ReductError::no_content("No content")),
-                    }
-                } else {
-                    let mut bm = block_manager.write().await?;
-                    match bm.find_block_candidate(self.start_time).await {
-                        Ok(block) => block.read().await?.block_id(),
-                        Err(err) if err.status() == ErrorCode::TooEarly => {
-                            debug!(
-                            "Skip query start block lookup for '{}' due to transient replica state: {}",
-                            self.entry_name, err
-                        );
-                            0
-                        }
-                        Err(_) => 0,
-                    }
-                };
-
-                let bm = block_manager.read().await?;
-                let mut block_candidates = Vec::new();
-                if first_block < self.stop_time {
-                    let active_tree = bm.index().active_tree();
-                    let last_timestamp_index = bm.index().last_record_index();
-
-                    let block_range: Vec<_> = active_tree
-                        .range(first_block..=self.stop_time)
-                        .cloned()
-                        .collect();
-                    for block_id in block_range {
-                        // store the first block candidate to start reading from
-                        if block_candidates.is_empty() {
-                            block_candidates.push(block_id);
-                            continue;
-                        }
-
-                        // check for overlapping blocks by comparing the last record timestamp of the first block with the current block id
-                        if last_timestamp_index
-                            .get(&block_candidates.first().unwrap())
-                            .unwrap()
-                            > &block_id
-                        {
-                            block_candidates.push(block_id);
-                        }
-                    }
-                }
-                block_candidates
-            };
-
-            let Some(&last_id) = block_candidate_ids.last() else {
-                return Err(ReductError::no_content("No content"));
-            };
-
-            let mut block_candidates = Vec::new();
-            for block_id in block_candidate_ids {
-                let mut bm = block_manager.write().await?;
-                let block_result = match bm.find_cached_block(block_id) {
-                    Some(block_ref) => Ok(block_ref),
-                    None => bm.load_block(block_id).await,
-                };
-                let block_ref = match block_result {
-                    Ok(block_ref) => block_ref,
-                    Err(err) if err.status() == ErrorCode::TooEarly => {
-                        debug!(
-                            "Skip transient replica block {} for query '{}': {}",
-                            block_id, self.entry_name, err
-                        );
-                        continue;
-                    }
-                    Err(err) if err.status() == ErrorCode::NotFound => {
-                        debug!(
-                            "Skip stale block {} for query '{}': {}",
-                            block_id, self.entry_name, err
-                        );
-                        continue;
-                    }
-                    Err(err) => return Err(err),
-                };
-
-                block_candidates.push(block_ref);
+            while !self
+                .get_records_from_nearest_overlapped_blocks(&block_manager)
+                .await?
+            {
+                // Continue fetching records until we find some or determine there are none
             }
-
-            if let Some(block) = block_candidates.last() {
-                self.last_scanned_block_id = Some(block.read().await?.block_id())
-            }
-
-            let found_records = self.filter_records_from_blocks(&block_candidates).await?;
-            self.records_from_current_blocks.extend(found_records);
-            self.block_candidates = block_candidates;
         }
 
         let Some((block_idx, record)) = self.records_from_current_blocks.pop_front() else {
@@ -470,6 +484,22 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn skips_filtered_block_to_return_record_from_next_block(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let mut query = build_query(900, 1001, QueryOptions::default()).unwrap();
+
+        let reader = query.next(block_manager.clone()).await.unwrap();
+        assert_eq!(reader.meta().timestamp(), 1000);
+        assert_eq!(
+            query.next(block_manager).await.err(),
+            Some(no_content!("No content"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn queries_overlapping_and_non_overlapping_block_groups(
         #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) {
@@ -554,6 +584,39 @@ mod tests {
             .map(|(reader, _)| reader.meta().timestamp())
             .collect();
         assert_eq!(timestamps, [1100, 1150, 1160, 1250, 1270, 1300]);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn queries_overlap_extended_by_middle_block_in_timestamp_order(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        add_blocks(
+            &block_manager,
+            &[
+                (1100, &[1100, 1200]),
+                (1150, &[1150, 1300]),
+                (1250, &[1250, 1270]),
+            ],
+        )
+        .await;
+
+        let mut query = build_query(
+            1100,
+            1400,
+            QueryOptions {
+                only_metadata: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let records = read_to_vector(&mut query, block_manager).await;
+        let timestamps: Vec<_> = records
+            .iter()
+            .map(|(reader, _)| reader.meta().timestamp())
+            .collect();
+        assert_eq!(timestamps, [1100, 1150, 1200, 1250, 1270, 1300]);
     }
 
     #[rstest]
@@ -742,6 +805,78 @@ mod tests {
             .insert_or_update_with_crc(block_meta.clone(), block_meta.crc64.unwrap());
 
         assert_eq!(query.next(replica).await.unwrap().meta().timestamp(), 1000);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn waits_for_transient_overlapping_block_before_returning_group(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let source = block_manager.await;
+        add_blocks(&source, &[(3, &[3])]).await;
+        let (path, bucket, entry, block_meta) = {
+            let mut bm = source.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            (
+                bm.path().clone(),
+                bm.bucket_name().to_string(),
+                bm.entry_name().to_string(),
+                bm.index().get_block(3).unwrap().clone(),
+            )
+        };
+        FILE_CACHE.remove(&path.join("3.meta")).await.unwrap();
+
+        let index = BlockIndex::try_load(path.clone().join("index"))
+            .await
+            .unwrap();
+        let replica = Arc::new(AsyncRwLock::new(
+            BlockManager::build(
+                path,
+                index,
+                bucket,
+                entry,
+                Arc::new(Cfg {
+                    role: InstanceRole::Replica,
+                    ..Default::default()
+                }),
+                Default::default(),
+            )
+            .await
+            .unwrap(),
+        ));
+
+        let mut query = build_query(
+            0,
+            1001,
+            QueryOptions {
+                only_metadata: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            query.next(replica.clone()).await.err(),
+            Some(no_content!("No content"))
+        );
+
+        {
+            let mut bm = source.write().await.unwrap();
+            let block = bm.load_block(3).await.unwrap();
+            bm.finish_block(block).await.unwrap();
+        }
+        replica
+            .write()
+            .await
+            .unwrap()
+            .index_mut()
+            .insert_or_update_with_crc(block_meta.clone(), block_meta.crc64.unwrap());
+
+        let records = read_to_vector(&mut query, replica).await;
+        let timestamps: Vec<_> = records
+            .iter()
+            .map(|(reader, _)| reader.meta().timestamp())
+            .collect();
+        assert_eq!(timestamps, [0, 3, 5, 1000]);
     }
 
     #[rstest]
