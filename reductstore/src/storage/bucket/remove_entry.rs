@@ -613,7 +613,9 @@ mod tests {
         entry.mark_deleting().await.unwrap();
         entry.sync_fs().await.unwrap();
         bucket.file_cache.remove_dir(entry.path()).await.unwrap();
-
+        tokio::fs::write(entry.path(), b"not a directory")
+            .await
+            .unwrap();
         Bucket::recover_entry_after_failed_removal(
             &bucket.entries,
             "test-1",

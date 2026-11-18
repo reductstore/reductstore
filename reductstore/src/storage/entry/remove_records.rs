@@ -161,7 +161,7 @@ impl Entry {
         mut options: QueryEntry,
     ) -> Result<Vec<u64>, ReductError> {
         options.continuous = None;
-        let query_id = self.query(options).await?;
+        let query_id = self.query_raw(options).await?;
         let (rx, _) = self.get_query_receiver(query_id).await?;
         let mut timestamps = vec![];
 
@@ -299,6 +299,17 @@ impl Entry {
                                 ),
                             );
                         }
+                    }
+                    Err(e) if e.status() == ErrorCode::NotFound => {
+                        error_map.insert(
+                            time,
+                            not_found!(
+                                "Record {} not found in entry {}/{}",
+                                time,
+                                bucket_name,
+                                entry_name
+                            ),
+                        );
                     }
                     Err(e) => {
                         error_map.insert(time, e);

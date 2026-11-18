@@ -33,6 +33,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found, unprocessable_entity};
+use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -133,7 +134,41 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub async fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
+    pub async fn query(&self, mut query_parameters: QueryEntry) -> Result<u64, ReductError> {
+        self.exclude_removed_meta_records(&mut query_parameters);
+
+        self.query_raw(query_parameters).await
+    }
+
+    fn exclude_removed_meta_records(&self, query_parameters: &mut QueryEntry) {
+        if !is_system_meta_entry(&self.name) {
+            return;
+        }
+
+        // Tombstones (and the older versions marked with them) are retained for
+        // replication and direct timestamp reads, but are not attachments.
+        let exclude = json!([{
+            "$and": [
+                {"$has": "remove"}, {"&remove": {"$eq": true}}
+            ]
+        }]);
+
+        let when = query_parameters.when.get_or_insert_with(|| json!({}));
+        match when.as_object_mut().unwrap().entry("$not") {
+            serde_json::map::Entry::Vacant(entry) => {
+                entry.insert(exclude);
+            }
+            serde_json::map::Entry::Occupied(mut entry) => {
+                entry
+                    .get_mut()
+                    .as_array_mut()
+                    .unwrap()
+                    .push(exclude.get(0).unwrap().clone());
+            }
+        }
+    }
+
+    pub(super) async fn query_raw(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
         let (start, stop) = self.get_query_time_range(&query_parameters).await?;
         let id = next_query_id();
         let block_manager = Arc::clone(&self.block_manager);
@@ -285,7 +320,7 @@ impl Entry {
         let publication = self.publication.begin_mutation(&self.path).await?;
         let block_ids = {
             let block_manager = self.block_manager.read().await?;
-            Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
+            Ok::<BTreeSet<u64>, ReductError>(block_manager.index().block_ids().clone())
         };
 
         for block_id in block_ids? {
@@ -309,7 +344,7 @@ impl Entry {
 
     pub(super) async fn oldest_block(&self) -> Result<Option<(u64, u64)>, ReductError> {
         let bm = self.block_manager.read().await?;
-        let Some(block_id) = bm.index().tree().first() else {
+        let Some(block_id) = bm.index().block_ids().first() else {
             return Ok(None);
         };
         let block = bm
@@ -329,7 +364,7 @@ impl Entry {
         let mut bm = self.block_manager.write().await?;
         let oldest_block_id = *bm
             .index()
-            .tree()
+            .block_ids()
             .first()
             .ok_or_else(|| internal_server_error!("No block to remove"))?;
         let removed_size = bm
@@ -359,6 +394,14 @@ impl Entry {
             return Ok(());
         }
 
+        if !self.has_compaction_work().await? {
+            debug!(
+                "Skipping compact for {}/{} because there are no dirty entries to persist",
+                self.bucket_name, self.name
+            );
+            return Ok(());
+        }
+
         let publication = self.publication.begin_mutation(&self.path).await?;
         if let Some(mut bm) = self.block_manager.try_write() {
             bm.set_mutation_batch(publication.token.clone());
@@ -377,6 +420,32 @@ impl Entry {
             );
             Ok(())
         }
+    }
+
+    /// Returns whether compaction has real work to publish.
+    ///
+    /// Compaction only ever persists metadata and the block index for blocks
+    /// that have a pending WAL. An entry that has already been published and
+    /// whose WAL is drained has nothing to flush, so the `Updating -> Ready`
+    /// publication cycle can be skipped entirely. An entry that has never been
+    /// published still needs its initial marker bootstrap.
+    async fn has_compaction_work(&self) -> Result<bool, ReductError> {
+        let Some(bm) = self.block_manager.try_read() else {
+            // If we cannot inspect the block manager right now, be conservative
+            // and proceed through the regular compact path, which itself skips
+            // when the block manager is busy.
+            return Ok(true);
+        };
+        if bm.has_pending_wal().await? {
+            return Ok(true);
+        }
+        if self.publication.has_pending_batch() {
+            return Ok(true);
+        }
+        Ok(!self
+            .file_cache
+            .try_exists(&self.path.join(".publication"))
+            .await?)
     }
 
     /// Flushes entry metadata and block index to the storage backend.
@@ -839,6 +908,28 @@ mod tests {
                 .await
                 .unwrap()
                 .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_skips_publication_when_clean(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+
+            // Write a record and flush it fully. After a full sync the WAL is
+            // drained, so a subsequent compaction has nothing to persist and must
+            // not start a new Updating -> Ready publication cycle (issue #1634).
+            write_stub_record(&entry, 1).await;
+            entry.sync_fs().await.unwrap();
+
+            let before = publication::load(&entry.path, &file_cache).await.unwrap();
+
+            entry.compact().await.unwrap();
+
+            let after = publication::load(&entry.path, &file_cache).await.unwrap();
+            assert_eq!(after, before);
         }
 
         #[rstest]
@@ -1375,7 +1466,7 @@ mod tests {
 
         let cached_info = entry.info().await.unwrap();
         let mut block_manager = entry.block_manager.write().await.unwrap();
-        let block_id = *block_manager.index().tree().first().unwrap();
+        let block_id = *block_manager.index().block_ids().first().unwrap();
         block_manager.remove_block(block_id).await.unwrap();
 
         let stale_info = tokio::time::timeout(Duration::from_millis(100), entry.info())

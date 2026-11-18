@@ -35,7 +35,11 @@ impl BlockManager {
     }
 
     pub async fn save_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
-        let id = block.read().await?.block_id();
+        let (id, latest) = {
+            let block = block.read().await?;
+            (block.block_id(), block.latest_record_time())
+        };
+        self.block_index.update_latest_record_time(id, latest);
         for (_, block) in self.block_cache.insert_write(id, block.clone()) {
             self.save_meta_on_disk(block).await?;
         }

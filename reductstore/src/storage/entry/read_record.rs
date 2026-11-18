@@ -229,7 +229,7 @@ mod tests {
 
         let data_path = {
             let bm = entry.block_manager.read().await.unwrap();
-            let block_id = *bm.index().tree().first().unwrap();
+            let block_id = *bm.index().block_ids().first().unwrap();
             bm.path().join(format!("{}{}", block_id, DATA_FILE_EXT))
         };
         entry.file_cache.remove(&data_path).await.unwrap();
@@ -276,7 +276,7 @@ mod tests {
 
         let data_path = {
             let bm = entry.block_manager.read().await.unwrap();
-            let block_id = *bm.index().tree().first().unwrap();
+            let block_id = *bm.index().block_ids().first().unwrap();
             bm.path().join(format!("{}{}", block_id, DATA_FILE_EXT))
         };
         entry.file_cache.remove(&data_path).await.unwrap();

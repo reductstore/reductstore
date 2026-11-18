@@ -1,0 +1,80 @@
+name: 'Durability Test'
+description: 'Verifies acknowledged multi-entry writes survive an abrupt server crash.'
+inputs:
+  rs_api_token:
+    description: 'API token for ReductStore.'
+    required: true
+  repository:
+    description: 'Docker image repository.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+      with:
+        python-version: 3.12
+    - name: Download Docker image artifact
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: image
+        path: /tmp/
+    - name: Load Docker image
+      shell: bash
+      run: docker load --input /tmp/image.tar
+    - name: Prepare data volume
+      shell: bash
+      run: |
+        DATA_VOLUME="reductstore-durability-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        echo "DATA_VOLUME=$DATA_VOLUME" >> "$GITHUB_ENV"
+        docker volume create "$DATA_VOLUME"
+    - name: Start ReductStore
+      shell: bash
+      run: |
+        docker run --network=host -v "${DATA_VOLUME}:/data" \
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
+          --name reductstore-durability -d ${{ inputs.repository }}
+        for _ in {1..20}; do
+          curl -fsS http://127.0.0.1:8383/api/v1/ready >/dev/null && break
+          sleep 1
+        done
+        curl -fsS http://127.0.0.1:8383/api/v1/ready >/dev/null
+    - name: Write acknowledged records and crash server
+      shell: bash
+      env:
+        RS_API_TOKEN: ${{ inputs.rs_api_token }}
+      run: |
+        pip install -r ./integration_tests/data_check/requirements.txt
+        python3 ./integration_tests/data_check/durability.py write --duration 45 &
+        WRITER_PID=$!
+        sleep 20
+        docker kill reductstore-durability
+        sleep 1
+        kill "$WRITER_PID" || true
+        wait "$WRITER_PID" || true
+    - name: Restart ReductStore
+      shell: bash
+      run: |
+        docker run --network=host -v "${DATA_VOLUME}:/data" \
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
+          --name reductstore-durability-restarted -d ${{ inputs.repository }}
+        for _ in {1..20}; do
+          curl -fsS http://127.0.0.1:8383/api/v1/ready >/dev/null && break
+          sleep 1
+        done
+        curl -fsS http://127.0.0.1:8383/api/v1/ready >/dev/null
+    - name: Verify acknowledged records
+      shell: bash
+      env:
+        RS_API_TOKEN: ${{ inputs.rs_api_token }}
+      run: python3 ./integration_tests/data_check/durability.py verify
+    - name: Save server logs
+      if: always()
+      shell: bash
+      run: |
+        docker logs reductstore-durability > /tmp/durability-before.log 2>&1 || true
+        docker logs reductstore-durability-restarted > /tmp/durability-after.log 2>&1 || true
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: always()
+      with:
+        name: durability-logs
+        path: /tmp/durability-*.log

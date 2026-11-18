@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
-use std::io::{Read, SeekFrom, Write};
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Once, Weak};
@@ -258,32 +258,44 @@ impl DecompressCache {
         compressed_path: &PathBuf,
         file_cache: &Arc<FileCache>,
     ) -> Result<(PathBuf, u64), ReductError> {
-        let mut compressed = vec![];
-        {
-            let mut file = file_cache.read(compressed_path, SeekFrom::Start(0)).await?;
-            file.read_to_end(&mut compressed).map_err(|err| {
-                internal_server_error!(
-                    "Failed to read compressed file {:?}: {}",
-                    compressed_path,
-                    err
-                )
-            })?;
-        }
-
-        let decompressed = zstd::decode_all(compressed.as_slice()).map_err(|err| {
-            internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
-        })?;
+        let mut compressed = file_cache.read(compressed_path, SeekFrom::Start(0)).await?;
 
         self.prepare_temp_dir()?;
 
         let temp_path = self.temp_path(entry_path, block_id, file_type);
-        if let Err(err) = write_temp_file(&temp_path, &decompressed) {
-            // Don't leave a partial file behind: nobody would ever remove it.
-            cleanup_tmp(&temp_path);
-            return Err(err);
-        }
+        let result = {
+            let mut temp_file = Self::create_temp_file(&temp_path)?;
 
-        Ok((temp_path, decompressed.len() as u64))
+            zstd::stream::read::Decoder::new(&mut *compressed)
+                .and_then(|mut decoder| std::io::copy(&mut decoder, &mut temp_file))
+                .map_err(|err| {
+                    internal_server_error!(
+                        "Failed to decompress file {:?}: {}",
+                        compressed_path,
+                        err
+                    )
+                })
+                .and_then(|size| {
+                    temp_file
+                        .sync_all()
+                        .map_err(|err| {
+                            internal_server_error!(
+                                "Failed to sync decompressed temporary file {:?}: {}",
+                                temp_path,
+                                err
+                            )
+                        })
+                        .map(|_| size)
+                })
+        };
+
+        match result {
+            Ok(size) => Ok((temp_path, size)),
+            Err(err) => {
+                cleanup_tmp(&temp_path);
+                Err(err)
+            }
+        }
     }
 
     fn prepare_temp_dir(&self) -> Result<(), ReductError> {
@@ -335,6 +347,22 @@ impl DecompressCache {
             NEXT_FILE_ID.fetch_add(1, Ordering::Relaxed),
             file_type.as_extension()
         ))
+    }
+
+    fn create_temp_file(path: &Path) -> Result<File, ReductError> {
+        OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .read(true)
+            .open(path)
+            .map_err(|err| {
+                internal_server_error!(
+                    "Failed to create decompressed temporary file {:?}: {}",
+                    path,
+                    err
+                )
+            })
     }
 }
 
@@ -458,36 +486,6 @@ impl CacheState {
     }
 }
 
-fn write_temp_file(path: &PathBuf, content: &[u8]) -> Result<(), ReductError> {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .read(true)
-        .open(path)
-        .map_err(|err| {
-            internal_server_error!(
-                "Failed to create decompressed temporary file {:?}: {}",
-                path,
-                err
-            )
-        })?;
-    file.write_all(content).map_err(|err| {
-        internal_server_error!(
-            "Failed to write decompressed temporary file {:?}: {}",
-            path,
-            err
-        )
-    })?;
-    file.sync_all().map_err(|err| {
-        internal_server_error!(
-            "Failed to sync decompressed temporary file {:?}: {}",
-            path,
-            err
-        )
-    })
-}
-
 /// Remove cache directories left by processes that terminated without cleanup.
 ///
 /// A directory is stale if nobody holds the lock on its lock file. The OS releases
@@ -558,6 +556,7 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
     use serial_test::serial;
+    use std::io::Read;
     use tempfile::tempdir;
 
     #[fixture]
@@ -594,6 +593,18 @@ mod tests {
             .collect::<Vec<_>>();
         files.sort();
         files
+    }
+
+    #[test]
+    fn test_create_temp_file_rejects_directory() {
+        let dir = tempdir().unwrap();
+
+        let err = DecompressCache::create_temp_file(dir.path()).unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err
+            .message()
+            .contains("Failed to create decompressed temporary file"));
     }
 
     #[rstest]
@@ -657,6 +668,34 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial(decompress_cache)]
+    async fn test_get_or_decompress_streams_large_block(dir: PathBuf) {
+        let compressed_path = dir.join("1.blk.zst");
+        let data = vec![42; 1024 * 1024];
+        std::fs::write(
+            &compressed_path,
+            zstd::encode_all(data.as_slice(), 3).unwrap(),
+        )
+        .unwrap();
+        let cache = cache_in(&dir, 2 * 1024 * 1024, DECOMPRESS_CACHE_TTL);
+
+        let path = cache
+            .get_or_decompress(
+                &dir,
+                1,
+                DecompressedFileType::Data,
+                &compressed_path,
+                &file_cache(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(path.path()).unwrap(), data);
+        assert_eq!(cache.inner.state.lock().total_size(), data.len() as u64);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial(decompress_cache)]
     async fn test_get_or_decompress_with_corrupted_data_returns_error(dir: PathBuf) {
         let compressed_path = dir.join("1.blk.zst");
         std::fs::write(&compressed_path, b"not valid zstd").unwrap();
@@ -698,6 +737,32 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.status(), ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial(decompress_cache)]
+    async fn test_get_or_decompress_removes_partial_file_on_error(dir: PathBuf) {
+        let compressed_path = dir.join("1.blk.zst");
+        let mut compressed = zstd::encode_all(vec![42; 1024 * 1024].as_slice(), 3).unwrap();
+        compressed.truncate(compressed.len() - 1);
+        std::fs::write(&compressed_path, compressed).unwrap();
+        let cache = cache_in(&dir, 2 * 1024 * 1024, DECOMPRESS_CACHE_TTL);
+
+        let err = cache
+            .get_or_decompress(
+                &dir,
+                1,
+                DecompressedFileType::Data,
+                &compressed_path,
+                &file_cache(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(cached_files(&cache.inner.temp_dir).is_empty());
+        assert_eq!(cache.inner.state.lock().total_size(), 0);
     }
 
     #[rstest]
@@ -1284,11 +1349,10 @@ mod tests {
 
         let err = result.unwrap_err();
         assert_eq!(err.status(), ErrorCode::InternalServerError);
-        // On Windows a directory can't even be opened, so the read itself isn't reached
-        if !cfg!(windows) {
-            assert!(err.message.contains("Failed to read compressed file"));
+        // Opening a directory may fail before the temporary directory is prepared.
+        if cache.inner.temp_dir.exists() {
+            assert!(cached_files(&cache.inner.temp_dir).is_empty());
         }
-        assert!(!cache.inner.temp_dir.exists(), "nothing decompressed");
         assert_eq!(cache.inner.state.lock().total_size(), 0);
     }
 

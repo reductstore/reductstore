@@ -21,7 +21,9 @@ pub struct File {
     backend: Arc<BoxedBackend>,
     path: PathBuf,
     last_synced: Instant,
+    last_local_sync: Instant,
     is_synced: bool,
+    is_locally_synced: bool,
     mode: AccessMode,
     ignore_write: bool, // read-only mode, write operations are ignored
     batch_id: Option<u64>,
@@ -108,7 +110,9 @@ impl OpenOptions {
             backend: Arc::clone(&self.backend),
             path: full_path,
             last_synced: Instant::now(),
+            last_local_sync: Instant::now(),
             is_synced: true,
+            is_locally_synced: true,
             mode: self.mode.clone(),
             ignore_write: self.ignore_write,
             batch_id: None,
@@ -155,7 +159,9 @@ impl File {
         Self::run_blocking_io(|| self.inner.sync_all())?;
         self.backend.upload(&self.path).await?;
         self.last_synced = Instant::now();
+        self.last_local_sync = self.last_synced;
         self.is_synced = true;
+        self.is_locally_synced = true;
         Ok(())
     }
 
@@ -172,6 +178,8 @@ impl File {
         self.is_synced = false;
 
         Self::run_blocking_io(|| self.inner.sync_all())?;
+        self.last_local_sync = Instant::now();
+        self.is_locally_synced = true;
         Ok(())
     }
 
@@ -185,6 +193,7 @@ impl File {
         }
 
         self.is_synced = false;
+        self.is_locally_synced = false;
         Self::run_blocking_io(|| self.inner.set_len(size))
     }
 
@@ -195,6 +204,14 @@ impl File {
 
     pub fn is_synced(&self) -> bool {
         self.is_synced
+    }
+
+    pub fn last_local_sync(&self) -> std::time::Instant {
+        self.last_local_sync
+    }
+
+    pub fn is_locally_synced(&self) -> bool {
+        self.is_locally_synced
     }
 
     #[allow(dead_code)]
@@ -225,6 +242,7 @@ impl Write for File {
             return Ok(buf.len());
         }
         self.is_synced = false;
+        self.is_locally_synced = false;
         Self::run_blocking_io(|| self.inner.write(buf))
     }
 
@@ -395,10 +413,13 @@ mod tests {
                 .unwrap();
 
             assert!(file.is_synced());
+            assert!(file.is_locally_synced());
             file.write_all(b" more").unwrap();
             assert!(!file.is_synced());
+            assert!(!file.is_locally_synced());
             file.sync_all().await.unwrap();
             assert!(file.is_synced());
+            assert!(file.is_locally_synced());
         }
 
         #[rstest]
@@ -415,10 +436,12 @@ mod tests {
             assert!(file.is_synced());
             file.write_all(b" more").unwrap();
             assert!(!file.is_synced());
+            assert!(!file.is_locally_synced());
 
             file.flush_local().await.unwrap();
 
             assert!(!file.is_synced());
+            assert!(file.is_locally_synced());
         }
 
         #[rstest]

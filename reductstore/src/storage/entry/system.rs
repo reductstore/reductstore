@@ -172,10 +172,14 @@ pub(crate) fn validate_remove_entry(entry_name: &str) -> Result<(), ReductError>
 mod tests {
     use super::*;
     use crate::cfg::Cfg;
+    use crate::storage::entry::update_labels::UpdateLabels;
     use crate::storage::entry::{Entry, EntrySettings};
     use bytes::Bytes;
     use reduct_base::error::ReductError;
+    use reduct_base::io::ReadRecord;
     use serial_test::serial;
+    use std::collections::HashSet;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     async fn build_entry(name: &str) -> Entry {
@@ -317,5 +321,68 @@ mod tests {
         assert!(entry.begin_read(1).await.is_err());
         assert!(entry.begin_read(2).await.is_ok());
         assert!(entry.begin_read(3).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn meta_query_excludes_tombstones_and_preserves_not_filters() {
+        let entry = Arc::new(build_entry("entry/$meta").await);
+        for (timestamp, key, category) in [
+            (1, "shared", "included"),
+            (2, "shared", "included"),
+            (3, "excluded", "excluded"),
+            (4, "shown", "included"),
+        ] {
+            write_record(
+                &entry,
+                timestamp,
+                Labels::from_iter([
+                    ("key".to_string(), key.to_string()),
+                    ("category".to_string(), category.to_string()),
+                ]),
+            )
+            .await;
+        }
+
+        entry
+            .clone()
+            .update_labels(vec![UpdateLabels {
+                time: 1,
+                update: Labels::from_iter([("remove".to_string(), "true".to_string())]),
+                remove: HashSet::new(),
+            }])
+            .await
+            .unwrap();
+
+        assert_eq!(query_timestamps(&entry, None).await, vec![3, 4]);
+        assert_eq!(
+            query_timestamps(
+                &entry,
+                Some(json!({
+                    "$not": [{"&category": {"$eq": "excluded"}}]
+                })),
+            )
+            .await,
+            vec![4]
+        );
+    }
+
+    async fn query_timestamps(entry: &Entry, when: Option<serde_json::Value>) -> Vec<u64> {
+        let id = entry
+            .query(QueryEntry {
+                when,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let (rx, _) = entry.get_query_receiver(id).await.unwrap();
+        let rx = rx.upgrade_and_unwrap();
+        let mut rx = rx.write().await.unwrap();
+        let mut timestamps = Vec::new();
+
+        while let Some(Ok(record)) = rx.recv().await {
+            timestamps.push(record.meta().timestamp());
+        }
+
+        timestamps
     }
 }

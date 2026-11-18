@@ -265,18 +265,21 @@ impl FileCache {
                     file
                 };
 
-                // Sync only writeable files that are not synced yet
-                // and are not used by other threads
+                // Publication batches defer remote visibility, not local durability.
+                // Dirty batch members must still receive bounded group commits.
                 if file_lock.mode() != &AccessMode::ReadWrite
-                    || file_lock.is_synced()
-                    || (!force && file_lock.last_synced().elapsed() < sync_interval)
+                    || file_lock.is_locally_synced()
+                    || (!force && file_lock.last_local_sync().elapsed() < sync_interval)
                 {
                     continue;
                 }
 
-                if !Self::is_batched(batches, path).await? {
-                    files_to_sync.push((path.clone(), file.clone(), file_lock.last_synced()));
-                }
+                files_to_sync.push((
+                    path.clone(),
+                    file.clone(),
+                    file_lock.last_local_sync(),
+                    Self::is_batched(batches, path).await?,
+                ));
             }
         }
 
@@ -286,7 +289,7 @@ impl FileCache {
             files_to_sync.truncate(FILE_CACHE_SYNC_BATCH_SIZE);
         }
 
-        for (path, file, _) in files_to_sync {
+        for (path, file, _, is_batched) in files_to_sync {
             let mut file_lock = if force {
                 file.write().await?
             } else {
@@ -296,7 +299,12 @@ impl FileCache {
                 file
             };
 
-            if let Err(err) = file_lock.sync_all().await {
+            let result = if is_batched {
+                file_lock.flush_local().await
+            } else {
+                file_lock.sync_all().await
+            };
+            if let Err(err) = result {
                 // ignore not found errors, since file can be removed while we are syncing,
                 // it's better than holding the file lock for too long and preventing other operations on the file
                 if err.kind() != std::io::ErrorKind::NotFound {
@@ -1308,7 +1316,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn batch_defers_background_sync_until_explicitly_published(tmp_dir: PathBuf) {
+    async fn batch_locally_syncs_before_explicit_publication(tmp_dir: PathBuf) {
         let scope = tmp_dir.join("entry");
         let file_path = scope.join("blocks.idx");
         let backend = build_backend(|mock| {
@@ -1347,6 +1355,18 @@ mod tests {
             .await
             .unwrap()
             .is_synced());
+
+        assert!(cache
+            .cache
+            .read()
+            .await
+            .unwrap()
+            .get(&file_path)
+            .unwrap()
+            .read()
+            .await
+            .unwrap()
+            .is_locally_synced());
 
         assert_eq!(
             cache

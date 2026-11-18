@@ -14,7 +14,7 @@ use prost::Message;
 
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole::Replica;
-use crate::core::file_cache::FileCache;
+use crate::core::file_cache::{BatchToken, FileCache};
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::compress::CompressionAlgorithm;
@@ -243,12 +243,23 @@ impl EntryLoader {
         usage_counters: Arc<UsageCounters>,
         file_cache: Arc<FileCache>,
     ) -> Result<Entry, ReductError> {
+        let mut file_batch = file_cache.begin_batch_for_scope(&path).await?;
+        let token = file_batch.token();
+
+        // Announce the repair window so replicas observe `Updating` until the
+        // repaired index and the `Ready` marker are synchronized together
+        // (issue #1633).
+        let updating = publication::Publication::new().updating()?;
+        publication::write_local_in_batch(&token, &path, &updating, &file_cache).await?;
+        file_batch.sync_all().await?;
+
         async fn remove_block_files(
             path: &PathBuf,
+            token: &BatchToken,
             file_cache: &Arc<FileCache>,
         ) -> Result<(), ReductError> {
             warn!("Removing meta block {:?}", path);
-            file_cache.remove(path).await?;
+            file_cache.remove_in_batch(token, path).await?;
 
             let name = path.file_name().unwrap().to_str().unwrap();
             let data_file =
@@ -261,7 +272,7 @@ impl EntryLoader {
                 };
             let data_path = path.parent().unwrap().join(data_file);
             warn!("Removing data block {:?}", data_path);
-            file_cache.remove(&data_path).await?;
+            file_cache.remove_in_batch(token, &data_path).await?;
             Ok(())
         }
 
@@ -302,7 +313,7 @@ impl EntryLoader {
                 Ok(block) => block,
                 Err(err) => {
                     error!("Failed to decode block {:?}: {}", path, err);
-                    remove_block_files(&path, &file_cache).await?;
+                    remove_block_files(&path, &token, &file_cache).await?;
                     continue;
                 }
             };
@@ -313,7 +324,7 @@ impl EntryLoader {
                     Ok(block) => block,
                     Err(err) => {
                         error!("Failed to decode block {:?}: {}", path, err);
-                        remove_block_files(&path, &file_cache).await?;
+                        remove_block_files(&path, &token, &file_cache).await?;
                         continue;
                     }
                 };
@@ -325,7 +336,7 @@ impl EntryLoader {
                 block.metadata_size = full_block.metadata_size;
 
                 let mut file = file_cache
-                    .write_or_create(&path, SeekFrom::Start(0))
+                    .write_or_create_in_batch(&token, &path, SeekFrom::Start(0))
                     .await?;
                 file.set_len(0)?;
 
@@ -339,7 +350,7 @@ impl EntryLoader {
                 ts_to_us(begin_time)
             } else {
                 warn!("Block {:?} has no begin time", path);
-                remove_block_files(&path, &file_cache).await?;
+                remove_block_files(&path, &token, &file_cache).await?;
                 continue;
             };
 
@@ -350,13 +361,10 @@ impl EntryLoader {
                     .unwrap()
                     .join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT));
                 if !file_cache.try_exists(&compressed_data_path).await? {
-                    warn!(
-                        "Data block {:?} not found. Removing its descriptor",
+                    return Err(internal_server_error!(
+                        "Data block {:?} not found",
                         compressed_data_path
-                    );
-                    block_index.remove_block(block_id);
-                    remove_block_files(&path, &file_cache).await?;
-                    continue;
+                    ));
                 }
 
                 let data_size = file_cache
@@ -376,8 +384,17 @@ impl EntryLoader {
             }
         }
 
+        block_index.set_batch_token(token.clone());
         block_index.save().await?;
+        block_index.clear_batch_token();
+        let index_crc = block_index.crc64();
         let info_cache = Arc::new(block_index.aggregate_stats());
+
+        let ready = updating.ready(index_crc)?;
+        publication::write_local_in_batch(&token, &path, &ready, &file_cache).await?;
+        file_batch.sync_all().await?;
+        file_batch.commit().await?;
+
         Ok(Entry {
             name: entry_name.clone(),
             bucket_name: bucket_name.clone(),
@@ -510,11 +527,11 @@ impl EntryLoader {
                         .ends_with(COMPRESSED_DESCRIPTOR_FILE_EXT))
             .count();
 
-        if number_of_descriptors != block_index.tree().len() {
+        if number_of_descriptors != block_index.block_ids().len() {
             warn!(
                 "Number of descriptors {} does not match block index {} in entry {:?}",
                 number_of_descriptors,
-                block_index.tree().len(),
+                block_index.block_ids().len(),
                 path
             );
 
@@ -531,7 +548,7 @@ impl EntryLoader {
         file_cache: &Arc<FileCache>,
     ) -> Result<(), ReductError> {
         let mut inconsistent_data = false;
-        for block_id in block_index.tree().iter() {
+        for block_id in block_index.block_ids().iter() {
             let block = block_index.get_block(*block_id).unwrap();
             let compressed = block
                 .compression
@@ -1574,7 +1591,7 @@ mod tests {
                 .await
                 .unwrap()
                 .index()
-                .tree()
+                .block_ids()
                 .len(),
             2,
             "should rebuild index and add the block"
