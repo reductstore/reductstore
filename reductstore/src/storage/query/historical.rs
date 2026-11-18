@@ -441,6 +441,61 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn queries_overlapping_and_non_overlapping_block_groups(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        {
+            let mut bm = block_manager.write().await.unwrap();
+            for (block_id, timestamps) in [
+                (1100, &[1100, 1180, 1230][..]),
+                (1150, &[1150, 1210][..]),
+                (1200, &[1200, 1250][..]),
+                (1400, &[1400][..]),
+                (1500, &[1500][..]),
+                (1700, &[1700, 1780][..]),
+                (1750, &[1750, 1790][..]),
+            ] {
+                let block_ref = bm.start_new_block(block_id, 10).await.unwrap();
+                {
+                    let mut block = block_ref.write().await.unwrap();
+                    for &timestamp in timestamps {
+                        block.insert_or_update_record(Record {
+                            timestamp: Some(us_to_ts(&timestamp)),
+                            begin: 0,
+                            end: 0,
+                            state: record::State::Finished as i32,
+                            labels: vec![],
+                            content_type: String::new(),
+                        });
+                    }
+                }
+                bm.finish_block(block_ref).await.unwrap();
+            }
+        }
+
+        let mut query = build_query(
+            1100,
+            1800,
+            QueryOptions {
+                only_metadata: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let records = read_to_vector(&mut query, block_manager).await;
+        let timestamps: Vec<_> = records
+            .iter()
+            .map(|(reader, _)| reader.meta().timestamp())
+            .collect();
+        assert_eq!(
+            timestamps,
+            [1100, 1150, 1180, 1200, 1210, 1230, 1250, 1400, 1500, 1700, 1750, 1780, 1790,]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_skips_missing_block_descriptor_on_replica(
         #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) {
