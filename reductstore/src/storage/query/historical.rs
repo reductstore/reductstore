@@ -360,6 +360,17 @@ mod tests {
         }
     }
 
+    async fn read_timestamps(
+        query: &mut HistoricalQuery,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) -> Vec<u64> {
+        read_to_vector(query, block_manager)
+            .await
+            .iter()
+            .map(|(reader, _)| reader.meta().timestamp())
+            .collect()
+    }
+
     mod new {
         use super::*;
         use serde_json::json;
@@ -392,751 +403,619 @@ mod tests {
             );
         }
     }
-    #[test]
-    fn test_set_labels() {
-        let mut record = Record {
-            timestamp: Some(us_to_ts(&100)),
-            begin: 0,
-            end: 10,
-            state: record::State::Finished as i32,
-            labels: vec![],
-            content_type: "text/plain".to_string(),
-        };
+    mod records {
+        use super::*;
 
-        let new_labels = HashMap::from([
-            ("key1".to_string(), "value1".to_string()),
-            ("key2".to_string(), "value2".to_string()),
-        ]);
+        #[test]
+        fn test_set_labels() {
+            let mut record = Record {
+                timestamp: Some(us_to_ts(&100)),
+                begin: 0,
+                end: 10,
+                state: record::State::Finished as i32,
+                labels: vec![],
+                content_type: "text/plain".to_string(),
+            };
 
-        record.set_labels(new_labels);
+            let new_labels = HashMap::from([
+                ("key1".to_string(), "value1".to_string()),
+                ("key2".to_string(), "value2".to_string()),
+            ]);
 
-        assert_eq!(record.labels.len(), 2);
-        assert_eq!(record.labels()[&"key1".to_string()], "value1");
-        assert_eq!(record.labels()[&"key2".to_string()], "value2");
+            record.set_labels(new_labels);
+
+            assert_eq!(record.labels.len(), 2);
+            assert_eq!(record.labels()[&"key1".to_string()], "value1");
+            assert_eq!(record.labels()[&"key2".to_string()], "value2");
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_query_only_metadata_returns_entry_name(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(
+                0,
+                5,
+                QueryOptions {
+                    only_metadata: true,
+                    ..QueryOptions::default()
+                },
+            )
+            .unwrap();
+            let reader = query.next(block_manager.clone()).await.unwrap();
+
+            assert_eq!(reader.meta().timestamp(), 0);
+            assert_eq!(
+                reader.meta().entry_name(),
+                "entry",
+                "entry_name should be returned for HEAD request (only_metadata=true)"
+            );
+        }
+
+        #[rstest]
+        #[case(5, &[0])]
+        #[case(1000, &[0, 5])]
+        #[case(1001, &[0, 5, 1000])]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn reads_records_within_time_range(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[case] stop_time: u64,
+            #[case] expected_timestamps: &[u64],
+        ) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(0, stop_time, QueryOptions::default()).unwrap();
+            let records = read_to_vector(&mut query, block_manager).await;
+
+            let timestamps: Vec<_> = records
+                .iter()
+                .map(|(reader, _)| reader.meta().timestamp())
+                .collect();
+            assert_eq!(timestamps, expected_timestamps);
+            assert!(records.iter().all(|(_, content)| content == "0123456789"));
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn skips_filtered_block_to_return_record_from_next_block(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(900, 1001, QueryOptions::default()).unwrap();
+
+            let reader = query.next(block_manager.clone()).await.unwrap();
+            assert_eq!(reader.meta().timestamp(), 1000);
+            assert_eq!(
+                query.next(block_manager).await.err(),
+                Some(no_content!("No content"))
+            );
+        }
     }
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_ok_1_rec(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
+    mod block_groups {
+        use super::*;
 
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-        assert_eq!(records[0].1, "0123456789");
+        async fn query_timestamps(
+            block_manager: Arc<AsyncRwLock<BlockManager>>,
+            stop_time: u64,
+            when: Option<serde_json::Value>,
+        ) -> Vec<u64> {
+            let mut query = build_query(
+                1100,
+                stop_time,
+                QueryOptions {
+                    only_metadata: true,
+                    when,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            read_timestamps(&mut query, block_manager).await
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn queries_overlapping_and_non_overlapping_block_groups(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            add_blocks(
+                &block_manager,
+                &[
+                    (1100, &[1100, 1180, 1230]),
+                    (1150, &[1150, 1210]),
+                    (1200, &[1200, 1250]),
+                    (1400, &[1400]),
+                    (1500, &[1500]),
+                    (1700, &[1700, 1780]),
+                    (1750, &[1750, 1790]),
+                ],
+            )
+            .await;
+
+            let timestamps = query_timestamps(block_manager, 1800, None).await;
+            assert_eq!(
+                timestamps,
+                [1100, 1150, 1180, 1200, 1210, 1230, 1250, 1400, 1500, 1700, 1750, 1780, 1790,]
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn queries_transitively_overlapping_blocks_in_timestamp_order(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            add_blocks(
+                &block_manager,
+                &[
+                    (1100, &[1100, 1300]),
+                    (1150, &[1150, 1160]),
+                    (1250, &[1250, 1270]), // we have overlap with 3 blocks
+                ],
+            )
+            .await;
+
+            let timestamps = query_timestamps(block_manager, 1400, None).await;
+            assert_eq!(timestamps, [1100, 1150, 1160, 1250, 1270, 1300]);
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn queries_overlap_extended_by_middle_block_in_timestamp_order(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            add_blocks(
+                &block_manager,
+                &[
+                    (1100, &[1100, 1200]),
+                    (1150, &[1150, 1300]),
+                    (1250, &[1250, 1270]),
+                ],
+            )
+            .await;
+
+            let timestamps = query_timestamps(block_manager, 1400, None).await;
+            assert_eq!(timestamps, [1100, 1150, 1200, 1250, 1270, 1300]);
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn applies_each_n_to_timestamp_order_across_overlapping_blocks(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            add_blocks(&block_manager, &[(1100, &[1100, 1300]), (1150, &[1150])]).await;
+
+            let timestamps =
+                query_timestamps(block_manager, 1400, Some(serde_json::json!({"$each_n": 2})))
+                    .await;
+            assert_eq!(timestamps, [1150]);
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn applies_limit_to_timestamp_order_across_overlapping_blocks(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            add_blocks(&block_manager, &[(1100, &[1100, 1300]), (1150, &[1150])]).await;
+
+            let timestamps = query_timestamps(
+                block_manager,
+                1400,
+                Some(serde_json::json!({"$limit": [2]})),
+            )
+            .await;
+            assert_eq!(timestamps, [1100, 1150]);
+        }
     }
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_only_metadata_returns_entry_name(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            5,
-            QueryOptions {
-                only_metadata: true,
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
-        let reader = query.next(block_manager.clone()).await.unwrap();
+    mod boundaries {
+        use super::*;
 
-        assert_eq!(reader.meta().timestamp(), 0);
-        assert_eq!(
-            reader.meta().entry_name(),
-            "entry",
-            "entry_name should be returned for HEAD request (only_metadata=true)"
-        );
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn does_not_scan_block_at_exclusive_stop_time(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(1000, 1000, QueryOptions::default()).unwrap();
+
+            assert_eq!(
+                query.next(block_manager).await.err(),
+                Some(no_content!("No content"))
+            );
+            assert_eq!(query.last_scanned_block_id, None);
+        }
     }
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_ok_2_recs(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(0, 1000, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
+    mod replica {
+        use super::*;
 
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-        assert_eq!(records[0].1, "0123456789");
-        assert_eq!(records[1].0.meta().timestamp(), 5);
-        assert_eq!(records[1].1, "0123456789");
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_ok_3_recs(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-
-        assert_eq!(records.len(), 3);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-        assert_eq!(records[0].1, "0123456789");
-        assert_eq!(records[1].0.meta().timestamp(), 5);
-        assert_eq!(records[1].1, "0123456789");
-        assert_eq!(records[2].0.meta().timestamp(), 1000);
-        assert_eq!(records[2].1, "0123456789");
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn skips_filtered_block_to_return_record_from_next_block(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(900, 1001, QueryOptions::default()).unwrap();
-
-        let reader = query.next(block_manager.clone()).await.unwrap();
-        assert_eq!(reader.meta().timestamp(), 1000);
-        assert_eq!(
-            query.next(block_manager).await.err(),
-            Some(no_content!("No content"))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn queries_overlapping_and_non_overlapping_block_groups(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        {
-            let mut bm = block_manager.write().await.unwrap();
-            for (block_id, timestamps) in [
-                (1100, &[1100, 1180, 1230][..]),
-                (1150, &[1150, 1210][..]),
-                (1200, &[1200, 1250][..]),
-                (1400, &[1400][..]),
-                (1500, &[1500][..]),
-                (1700, &[1700, 1780][..]),
-                (1750, &[1750, 1790][..]),
-            ] {
-                let block_ref = bm.start_new_block(block_id, 10).await.unwrap();
-                {
-                    let mut block = block_ref.write().await.unwrap();
-                    for &timestamp in timestamps {
-                        block.insert_or_update_record(Record {
-                            timestamp: Some(us_to_ts(&timestamp)),
-                            begin: 0,
-                            end: 0,
-                            state: record::State::Finished as i32,
-                            labels: vec![],
-                            content_type: String::new(),
-                        });
-                    }
-                }
-                bm.finish_block(block_ref).await.unwrap();
+        async fn replica_from_source(
+            source: &Arc<AsyncRwLock<BlockManager>>,
+            missing_descriptor: Option<u64>,
+        ) -> Arc<AsyncRwLock<BlockManager>> {
+            let (path, bucket, entry) = {
+                let mut bm = source.write().await.unwrap();
+                bm.save_cache_on_disk().await.unwrap();
+                (
+                    bm.path().clone(),
+                    bm.bucket_name().to_string(),
+                    bm.entry_name().to_string(),
+                )
+            };
+            if let Some(block_id) = missing_descriptor {
+                FILE_CACHE
+                    .remove(&path.join(format!("{block_id}.meta")))
+                    .await
+                    .unwrap();
             }
-        }
 
-        let mut query = build_query(
-            1100,
-            1800,
-            QueryOptions {
-                only_metadata: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-        let timestamps: Vec<_> = records
-            .iter()
-            .map(|(reader, _)| reader.meta().timestamp())
-            .collect();
-        assert_eq!(
-            timestamps,
-            [1100, 1150, 1180, 1200, 1210, 1230, 1250, 1400, 1500, 1700, 1750, 1780, 1790,]
-        );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn queries_transitively_overlapping_blocks_in_timestamp_order(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        add_blocks(
-            &block_manager,
-            &[
-                (1100, &[1100, 1300]),
-                (1150, &[1150, 1160]),
-                (1250, &[1250, 1270]), // we have overlap with 3 blocks
-            ],
-        )
-        .await;
-
-        let mut query = build_query(
-            1100,
-            1400,
-            QueryOptions {
-                only_metadata: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-        let timestamps: Vec<_> = records
-            .iter()
-            .map(|(reader, _)| reader.meta().timestamp())
-            .collect();
-        assert_eq!(timestamps, [1100, 1150, 1160, 1250, 1270, 1300]);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn queries_overlap_extended_by_middle_block_in_timestamp_order(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        add_blocks(
-            &block_manager,
-            &[
-                (1100, &[1100, 1200]),
-                (1150, &[1150, 1300]),
-                (1250, &[1250, 1270]),
-            ],
-        )
-        .await;
-
-        let mut query = build_query(
-            1100,
-            1400,
-            QueryOptions {
-                only_metadata: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-        let timestamps: Vec<_> = records
-            .iter()
-            .map(|(reader, _)| reader.meta().timestamp())
-            .collect();
-        assert_eq!(timestamps, [1100, 1150, 1200, 1250, 1270, 1300]);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn applies_each_n_to_timestamp_order_across_overlapping_blocks(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        add_blocks(&block_manager, &[(1100, &[1100, 1300]), (1150, &[1150])]).await;
-
-        let mut query = build_query(
-            1100,
-            1400,
-            QueryOptions {
-                only_metadata: true,
-                when: Some(serde_json::json!({"$each_n": 2})),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-        let timestamps: Vec<_> = records
-            .iter()
-            .map(|(reader, _)| reader.meta().timestamp())
-            .collect();
-        assert_eq!(timestamps, [1150]);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn applies_limit_to_timestamp_order_across_overlapping_blocks(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        add_blocks(&block_manager, &[(1100, &[1100, 1300]), (1150, &[1150])]).await;
-
-        let mut query = build_query(
-            1100,
-            1400,
-            QueryOptions {
-                only_metadata: true,
-                when: Some(serde_json::json!({"$limit": [2]})),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-        let timestamps: Vec<_> = records
-            .iter()
-            .map(|(reader, _)| reader.meta().timestamp())
-            .collect();
-        assert_eq!(timestamps, [1100, 1150]);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn does_not_scan_block_at_exclusive_stop_time(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(1000, 1000, QueryOptions::default()).unwrap();
-
-        assert_eq!(
-            query.next(block_manager).await.err(),
-            Some(no_content!("No content"))
-        );
-        assert_eq!(query.last_scanned_block_id, None);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_skips_missing_block_descriptor_on_replica(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let source_block_manager = block_manager.await;
-        let (path, bucket, entry) = {
-            let mut bm = source_block_manager.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
-            (
-                bm.path().clone(),
-                bm.bucket_name().to_string(),
-                bm.entry_name().to_string(),
-            )
-        };
-
-        FILE_CACHE.remove(&path.join("1000.meta")).await.unwrap();
-
-        let cfg = Cfg {
-            role: InstanceRole::Replica,
-            ..Default::default()
-        };
-
-        let index = BlockIndex::try_load(path.join("index")).await.unwrap();
-        let block_manager = Arc::new(AsyncRwLock::new(
-            BlockManager::build(
-                path,
-                index,
-                bucket,
-                entry,
-                Arc::new(cfg),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
-        ));
-
-        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-        assert_eq!(records[1].0.meta().timestamp(), 5);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn retries_transient_replica_block_after_descriptor_becomes_available(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let source = block_manager.await;
-        let (path, bucket, entry, block_meta) = {
-            let mut bm = source.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
-            (
-                bm.path().clone(),
-                bm.bucket_name().to_string(),
-                bm.entry_name().to_string(),
-                bm.index().get_block(1000).unwrap().clone(),
-            )
-        };
-        FILE_CACHE.remove(&path.join("1000.meta")).await.unwrap();
-
-        let index = BlockIndex::try_load(path.clone().join("index"))
-            .await
-            .unwrap();
-        let replica = Arc::new(AsyncRwLock::new(
-            BlockManager::build(
-                path,
-                index,
-                bucket,
-                entry,
-                Arc::new(Cfg {
-                    role: InstanceRole::Replica,
-                    ..Default::default()
-                }),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
-        ));
-
-        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
-        assert_eq!(
-            query
-                .next(replica.clone())
-                .await
-                .unwrap()
-                .meta()
-                .timestamp(),
-            0
-        );
-        assert_eq!(
-            query
-                .next(replica.clone())
-                .await
-                .unwrap()
-                .meta()
-                .timestamp(),
-            5
-        );
-        assert_eq!(
-            query.next(replica.clone()).await.err(),
-            Some(no_content!("No content"))
-        );
-
-        {
-            let mut bm = source.write().await.unwrap();
-            let block = bm.load_block(1000).await.unwrap();
-            bm.finish_block(block).await.unwrap();
-        }
-        replica
-            .write()
-            .await
-            .unwrap()
-            .index_mut()
-            .insert_or_update_with_crc(block_meta.clone(), block_meta.crc64.unwrap());
-
-        assert_eq!(query.next(replica).await.unwrap().meta().timestamp(), 1000);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn waits_for_transient_overlapping_block_before_returning_group(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let source = block_manager.await;
-        add_blocks(&source, &[(3, &[3])]).await;
-        let (path, bucket, entry, block_meta) = {
-            let mut bm = source.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
-            (
-                bm.path().clone(),
-                bm.bucket_name().to_string(),
-                bm.entry_name().to_string(),
-                bm.index().get_block(3).unwrap().clone(),
-            )
-        };
-        FILE_CACHE.remove(&path.join("3.meta")).await.unwrap();
-
-        let index = BlockIndex::try_load(path.clone().join("index"))
-            .await
-            .unwrap();
-        let replica = Arc::new(AsyncRwLock::new(
-            BlockManager::build(
-                path,
-                index,
-                bucket,
-                entry,
-                Arc::new(Cfg {
-                    role: InstanceRole::Replica,
-                    ..Default::default()
-                }),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
-        ));
-
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                only_metadata: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            query.next(replica.clone()).await.err(),
-            Some(no_content!("No content"))
-        );
-
-        {
-            let mut bm = source.write().await.unwrap();
-            let block = bm.load_block(3).await.unwrap();
-            bm.finish_block(block).await.unwrap();
-        }
-        replica
-            .write()
-            .await
-            .unwrap()
-            .index_mut()
-            .insert_or_update_with_crc(block_meta.clone(), block_meta.crc64.unwrap());
-
-        let records = read_to_vector(&mut query, replica).await;
-        let timestamps: Vec<_> = records
-            .iter()
-            .map(|(reader, _)| reader.meta().timestamp())
-            .collect();
-        assert_eq!(timestamps, [0, 3, 5, 1000]);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_skips_corrupted_block(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        block_manager
-            .write()
-            .await
-            .unwrap()
-            .mark_block_corrupted(0)
-            .await
-            .unwrap();
-
-        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.meta().timestamp(), 1000);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_stops_when_current_block_latest_time_reaches_next_block(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-
-        {
-            let block_ref = block_manager
-                .write()
-                .await
-                .unwrap()
-                .load_block(0)
+            let index = BlockIndex::try_load(path.clone().join("index"))
                 .await
                 .unwrap();
-            block_ref
+            Arc::new(AsyncRwLock::new(
+                BlockManager::build(
+                    path,
+                    index,
+                    bucket,
+                    entry,
+                    Arc::new(Cfg {
+                        role: InstanceRole::Replica,
+                        ..Default::default()
+                    }),
+                    Default::default(),
+                )
+                .await
+                .unwrap(),
+            ))
+        }
+
+        async fn restore_descriptor(
+            source: &Arc<AsyncRwLock<BlockManager>>,
+            replica: &Arc<AsyncRwLock<BlockManager>>,
+            block_id: u64,
+        ) {
+            let block_meta = {
+                let mut bm = source.write().await.unwrap();
+                let block = bm.load_block(block_id).await.unwrap();
+                bm.finish_block(block).await.unwrap();
+                bm.index().get_block(block_id).unwrap().clone()
+            };
+            replica
                 .write()
                 .await
                 .unwrap()
-                .insert_or_update_record(Record {
-                    timestamp: Some(us_to_ts(&1000)),
-                    begin: 0,
-                    end: 10,
-                    state: record::State::Finished as i32,
-                    labels: vec![],
-                    content_type: "".to_string(),
-                });
+                .index_mut()
+                .insert_or_update_with_crc(block_meta.clone(), block_meta.crc64.unwrap());
         }
 
-        let mut query = build_query(0, 500, QueryOptions::default()).unwrap();
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_query_skips_missing_block_descriptor_on_replica(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let source = block_manager.await;
+            let replica = replica_from_source(&source, Some(1000)).await;
 
-        assert_eq!(
-            query
-                .next(block_manager.clone())
-                .await
-                .unwrap()
-                .meta()
-                .timestamp(),
-            0
-        );
-        assert_eq!(
-            query
-                .next(block_manager.clone())
-                .await
-                .unwrap()
-                .meta()
-                .timestamp(),
-            5
-        );
-        assert_eq!(
-            query.next(block_manager).await.err(),
-            Some(no_content!("No content"))
-        );
-    }
+            let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
+            let records = read_to_vector(&mut query, replica).await;
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_does_not_reload_index_on_crc_mismatch_replica(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let source_block_manager = block_manager.await;
-        let (path, bucket, entry) = {
-            let mut bm = source_block_manager.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
-            (
-                bm.path().clone(),
-                bm.bucket_name().to_string(),
-                bm.entry_name().to_string(),
-            )
-        };
-
-        let cfg = Cfg {
-            role: InstanceRole::Replica,
-            ..Default::default()
-        };
-
-        let index = BlockIndex::try_load(path.join("index")).await.unwrap();
-        let replica_block_manager = Arc::new(AsyncRwLock::new(
-            BlockManager::build(
-                path,
-                index,
-                bucket,
-                entry,
-                Arc::new(cfg),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
-        ));
-
-        // Simulate stale in-memory CRC while index on disk is already updated.
-        {
-            let mut bm = replica_block_manager.write().await.unwrap();
-            bm.index_mut()
-                .insert_or_update_with_crc(Block::new(1000), 1);
+            assert_eq!(records.len(), 2);
+            assert_eq!(records[0].0.meta().timestamp(), 0);
+            assert_eq!(records[1].0.meta().timestamp(), 5);
         }
 
-        let mut query = build_query(1000, 1001, QueryOptions::default()).unwrap();
-        let err = query.next(replica_block_manager).await.err().unwrap();
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn retries_transient_replica_block_after_descriptor_becomes_available(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let source = block_manager.await;
+            let replica = replica_from_source(&source, Some(1000)).await;
 
-        assert_eq!(err.status(), ErrorCode::NoContent);
-    }
+            let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
+            assert_eq!(
+                query
+                    .next(replica.clone())
+                    .await
+                    .unwrap()
+                    .meta()
+                    .timestamp(),
+                0
+            );
+            assert_eq!(
+                query
+                    .next(replica.clone())
+                    .await
+                    .unwrap()
+                    .meta()
+                    .timestamp(),
+                5
+            );
+            assert_eq!(
+                query.next(replica.clone()).await.err(),
+                Some(no_content!("No content"))
+            );
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_ignoring_errored_records(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
-        {
-            let block_ref = block_manager
-                .write()
-                .await
-                .unwrap()
-                .load_block(0)
-                .await
-                .unwrap();
+            restore_descriptor(&source, &replica, 1000).await;
+
+            assert_eq!(query.next(replica).await.unwrap().meta().timestamp(), 1000);
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn waits_for_transient_overlapping_block_before_returning_group(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let source = block_manager.await;
+            add_blocks(&source, &[(3, &[3])]).await;
+            let replica = replica_from_source(&source, Some(3)).await;
+
+            let mut query = build_query(
+                0,
+                1001,
+                QueryOptions {
+                    only_metadata: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                query.next(replica.clone()).await.err(),
+                Some(no_content!("No content"))
+            );
+
+            restore_descriptor(&source, &replica, 3).await;
+
+            let timestamps = read_timestamps(&mut query, replica).await;
+            assert_eq!(timestamps, [0, 3, 5, 1000]);
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_query_does_not_reload_index_on_crc_mismatch_replica(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let source = block_manager.await;
+            let replica_block_manager = replica_from_source(&source, None).await;
+
+            // Simulate stale in-memory CRC while index on disk is already updated.
             {
-                let mut block = block_ref.write().await.unwrap();
-                let mut record = block.get_record(0).unwrap().clone();
-                record.state = record::State::Errored as i32;
-                block.insert_or_update_record(record);
+                let mut bm = replica_block_manager.write().await.unwrap();
+                bm.index_mut()
+                    .insert_or_update_with_crc(Block::new(1000), 1);
             }
+
+            let mut query = build_query(1000, 1001, QueryOptions::default()).unwrap();
+            let err = query.next(replica_block_manager).await.err().unwrap();
+
+            assert_eq!(err.status(), ErrorCode::NoContent);
+        }
+    }
+
+    mod filtering {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_query_skips_corrupted_block(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
             block_manager
                 .write()
                 .await
                 .unwrap()
-                .save_block(block_ref)
+                .mark_block_corrupted(0)
                 .await
                 .unwrap();
+
+            let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
+            let records = read_to_vector(&mut query, block_manager).await;
+
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].0.meta().timestamp(), 1000);
         }
 
-        assert_eq!(
-            query.next(block_manager.clone()).await.err(),
-            Some(no_content!("No content"))
-        );
-    }
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_query_stops_when_current_block_latest_time_reaches_next_block(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_each_n_records(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                when: Some(serde_json::json!({"$each_n": 2})),
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
+            {
+                let block_ref = block_manager
+                    .write()
+                    .await
+                    .unwrap()
+                    .load_block(0)
+                    .await
+                    .unwrap();
+                block_ref
+                    .write()
+                    .await
+                    .unwrap()
+                    .insert_or_update_record(Record {
+                        timestamp: Some(us_to_ts(&1000)),
+                        begin: 0,
+                        end: 10,
+                        state: record::State::Finished as i32,
+                        labels: vec![],
+                        content_type: "".to_string(),
+                    });
+            }
 
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.meta().timestamp(), 5);
-    }
+            let mut query = build_query(0, 500, QueryOptions::default()).unwrap();
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_when_filter(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                when: Some(serde_json::from_str(r#"{"$and": ["&flag"]}"#).unwrap()),
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
+            assert_eq!(
+                query
+                    .next(block_manager.clone())
+                    .await
+                    .unwrap()
+                    .meta()
+                    .timestamp(),
+                0
+            );
+            assert_eq!(
+                query
+                    .next(block_manager.clone())
+                    .await
+                    .unwrap()
+                    .meta()
+                    .timestamp(),
+                5
+            );
+            assert_eq!(
+                query.next(block_manager).await.err(),
+                Some(no_content!("No content"))
+            );
+        }
 
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-    }
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_ignoring_errored_records(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
+            {
+                let block_ref = block_manager
+                    .write()
+                    .await
+                    .unwrap()
+                    .load_block(0)
+                    .await
+                    .unwrap();
+                {
+                    let mut block = block_ref.write().await.unwrap();
+                    let mut record = block.get_record(0).unwrap().clone();
+                    record.state = record::State::Errored as i32;
+                    block.insert_or_update_record(record);
+                }
+                block_manager
+                    .write()
+                    .await
+                    .unwrap()
+                    .save_block(block_ref)
+                    .await
+                    .unwrap();
+            }
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_when_filter_strict(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                when: Some(serde_json::from_str(r#"{"$and": ["&NOT_EXIST"]}"#).unwrap()),
-                strict: true,
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            query.next(block_manager.clone()).await.err(),
-            Some(not_found!("Reference 'NOT_EXIST' not found"))
-        );
-    }
+            assert_eq!(
+                query.next(block_manager.clone()).await.err(),
+                Some(no_content!("No content"))
+            );
+        }
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_when_with_interruption(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                when: Some(serde_json::from_str(r#"{"$limit": [1]}"#).unwrap()),
-                strict: true,
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_each_n_records(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(
+                0,
+                1001,
+                QueryOptions {
+                    when: Some(serde_json::json!({"$each_n": 2})),
+                    ..QueryOptions::default()
+                },
+            )
+            .unwrap();
+            let records = read_to_vector(&mut query, block_manager).await;
 
-        let records = read_to_vector(&mut query, block_manager).await;
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].0.meta().timestamp(), 5);
+        }
 
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-    }
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_when_filter(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(
+                0,
+                1001,
+                QueryOptions {
+                    when: Some(serde_json::from_str(r#"{"$and": ["&flag"]}"#).unwrap()),
+                    ..QueryOptions::default()
+                },
+            )
+            .unwrap();
+            let records = read_to_vector(&mut query, block_manager).await;
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_when_filter_non_strict(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                when: Some(serde_json::from_str(r#"{"$and": ["&NOT_EXIST"]}"#).unwrap()),
-                strict: false,
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            query.next(block_manager.clone()).await.err(),
-            Some(no_content!("No content")),
-            "errored condition should be ignored in non-strict mode"
-        );
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].0.meta().timestamp(), 0);
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_when_filter_strict(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(
+                0,
+                1001,
+                QueryOptions {
+                    when: Some(serde_json::from_str(r#"{"$and": ["&NOT_EXIST"]}"#).unwrap()),
+                    strict: true,
+                    ..QueryOptions::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                query.next(block_manager.clone()).await.err(),
+                Some(not_found!("Reference 'NOT_EXIST' not found"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_when_with_interruption(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(
+                0,
+                1001,
+                QueryOptions {
+                    when: Some(serde_json::from_str(r#"{"$limit": [1]}"#).unwrap()),
+                    strict: true,
+                    ..QueryOptions::default()
+                },
+            )
+            .unwrap();
+
+            let records = read_to_vector(&mut query, block_manager).await;
+
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].0.meta().timestamp(), 0);
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_when_filter_non_strict(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) {
+            let block_manager = block_manager.await;
+            let mut query = build_query(
+                0,
+                1001,
+                QueryOptions {
+                    when: Some(serde_json::from_str(r#"{"$and": ["&NOT_EXIST"]}"#).unwrap()),
+                    strict: false,
+                    ..QueryOptions::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                query.next(block_manager.clone()).await.err(),
+                Some(no_content!("No content")),
+                "errored condition should be ignored in non-strict mode"
+            );
+        }
     }
 
     async fn read_to_vector(
