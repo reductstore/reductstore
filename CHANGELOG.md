@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Coerce values of the `#strict` query directive with the same rules as condition values, [PR-1721](https://github.com/reductstore/reductstore/pull/1721)
 - Prevent replica index refreshes from blocking unrelated cached file reads, [PR-1713](https://github.com/reductstore/reductstore/pull/1713)
 - Retain the previous attachment version during replacement so replica listings cannot observe a missing attachment key, [PR-1712](https://github.com/reductstore/reductstore/pull/1712)
 - Retry replica queries after reloading indexes that disagree with cached block descriptors, [PR-1706](https://github.com/reductstore/reductstore/pull/1706)
