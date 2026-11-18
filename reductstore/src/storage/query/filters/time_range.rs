@@ -30,10 +30,10 @@ impl<R: FilterRecord> RecordFilter<R> for TimeRangeFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         let ts = record.timestamp();
         let ret = ts >= self.start && ts < self.stop;
-        // if ret {
-        //     // Ensure that we don't return the same record twice
-        //     self.start = ts + 1;
-        // }
+        if ret {
+            // Ensure that we don't return the same record twice
+            self.start = ts + 1;
+        }
 
         if ret {
             Ok(Some(vec![record]))

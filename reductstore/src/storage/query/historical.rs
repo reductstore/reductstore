@@ -129,7 +129,7 @@ impl Query for HistoricalQuery {
     ) -> Result<RecordReader, ReductError> {
         if self.records_from_current_blocks.is_empty() && !self.is_interrupted {
             self.block_candidates.clear();
-            let block_candidate_id = {
+            let block_candidate_ids = {
                 let first_block = if let Some(last_id) = self.last_scanned_block_id {
                     let bm = block_manager.read().await?;
                     match bm
@@ -159,7 +159,7 @@ impl Query for HistoricalQuery {
 
                 let bm = block_manager.read().await?;
                 let mut block_candidates = Vec::new();
-                if first_block <= self.stop_time {
+                if first_block < self.stop_time {
                     let active_tree = bm.index().active_tree();
                     let last_timestamp_index = bm.index().last_record_index();
 
@@ -174,9 +174,11 @@ impl Query for HistoricalQuery {
                             continue;
                         }
 
-                        // check for overlapping blocks by comparing the last record timestamp of the previous block with the current block id
-                        if last_timestamp_index.get(&block_id).unwrap()
-                            > &block_candidates.last().unwrap()
+                        // check for overlapping blocks by comparing the last record timestamp of the first block with the current block id
+                        if last_timestamp_index
+                            .get(&block_candidates.first().unwrap())
+                            .unwrap()
+                            > &block_id
                         {
                             block_candidates.push(block_id);
                         }
@@ -185,13 +187,12 @@ impl Query for HistoricalQuery {
                 block_candidates
             };
 
-            let Some(&last_id) = block_candidate_id.last() else {
+            let Some(&last_id) = block_candidate_ids.last() else {
                 return Err(ReductError::no_content("No content"));
             };
-            self.last_scanned_block_id = Some(last_id);
 
             let mut block_candidates = Vec::new();
-            for block_id in block_candidate_id {
+            for block_id in block_candidate_ids {
                 let mut bm = block_manager.write().await?;
                 let block_result = match bm.find_cached_block(block_id) {
                     Some(block_ref) => Ok(block_ref),
@@ -217,6 +218,10 @@ impl Query for HistoricalQuery {
                 };
 
                 block_candidates.push(block_ref);
+            }
+
+            if let Some(block) = block_candidates.last() {
+                self.last_scanned_block_id = Some(block.read().await?.block_id())
             }
 
             let found_records = self.filter_records_from_blocks(&block_candidates).await?;
@@ -252,24 +257,28 @@ impl HistoricalQuery {
         &mut self,
         block_candidates: &Vec<BlockRef>,
     ) -> Result<Vec<(usize, Record)>, ReductError> {
-        let mut filtered_records = Vec::new();
+        let mut unfiltered_records = Vec::new();
+        let mut filtered_records: Vec<(usize, Record)> = Vec::new();
         for (block_idx, block) in block_candidates.iter().enumerate() {
             for record in block.read().await?.record_index().values() {
-                match apply_filters_recursively(
-                    self.filters.as_mut_slice(),
-                    vec![record.clone()],
-                    0,
-                )? {
-                    Some(records) => {
-                        for record in records {
-                            filtered_records.push((block_idx, record));
-                        }
+                unfiltered_records.push((block_idx, record.clone()));
+            }
+        }
+
+        // we need sorted data before applying filters
+        unfiltered_records
+            .sort_by_key(|(_, rec): &(_, _)| ts_to_us(rec.timestamp.as_ref().unwrap()));
+        for (block_idx, record) in unfiltered_records {
+            match apply_filters_recursively(self.filters.as_mut_slice(), vec![record.clone()], 0)? {
+                Some(records) => {
+                    for record in records {
+                        filtered_records.push((block_idx, record));
                     }
-                    None => {
-                        // If the filtering is interrupted, we stop processing further records.
-                        self.is_interrupted = true;
-                        break;
-                    }
+                }
+                None => {
+                    // If the filtering is interrupted, we stop processing further records.
+                    self.is_interrupted = true;
+                    break;
                 }
             }
 
@@ -278,7 +287,6 @@ impl HistoricalQuery {
             }
         }
 
-        filtered_records.sort_by_key(|(_, rec)| ts_to_us(rec.timestamp.as_ref().unwrap()));
         Ok(filtered_records)
     }
 }
@@ -315,6 +323,27 @@ mod tests {
             options,
             IoConfig::default(),
         )
+    }
+
+    async fn add_blocks(block_manager: &Arc<AsyncRwLock<BlockManager>>, blocks: &[(u64, &[u64])]) {
+        let mut bm = block_manager.write().await.unwrap();
+        for &(block_id, timestamps) in blocks {
+            let block_ref = bm.start_new_block(block_id, 10).await.unwrap();
+            {
+                let mut block = block_ref.write().await.unwrap();
+                for &timestamp in timestamps {
+                    block.insert_or_update_record(Record {
+                        timestamp: Some(us_to_ts(&timestamp)),
+                        begin: 0,
+                        end: 0,
+                        state: record::State::Finished as i32,
+                        labels: vec![],
+                        content_type: String::new(),
+                    });
+                }
+            }
+            bm.finish_block(block_ref).await.unwrap();
+        }
     }
 
     mod new {
@@ -496,6 +525,106 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn queries_transitively_overlapping_blocks_in_timestamp_order(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        add_blocks(
+            &block_manager,
+            &[
+                (1100, &[1100, 1300]),
+                (1150, &[1150, 1160]),
+                (1250, &[1250, 1270]), // we have overlap with 3 blocks
+            ],
+        )
+        .await;
+
+        let mut query = build_query(
+            1100,
+            1400,
+            QueryOptions {
+                only_metadata: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let records = read_to_vector(&mut query, block_manager).await;
+        let timestamps: Vec<_> = records
+            .iter()
+            .map(|(reader, _)| reader.meta().timestamp())
+            .collect();
+        assert_eq!(timestamps, [1100, 1150, 1160, 1250, 1270, 1300]);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn applies_each_n_to_timestamp_order_across_overlapping_blocks(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        add_blocks(&block_manager, &[(1100, &[1100, 1300]), (1150, &[1150])]).await;
+
+        let mut query = build_query(
+            1100,
+            1400,
+            QueryOptions {
+                only_metadata: true,
+                when: Some(serde_json::json!({"$each_n": 2})),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let records = read_to_vector(&mut query, block_manager).await;
+        let timestamps: Vec<_> = records
+            .iter()
+            .map(|(reader, _)| reader.meta().timestamp())
+            .collect();
+        assert_eq!(timestamps, [1150]);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn applies_limit_to_timestamp_order_across_overlapping_blocks(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        add_blocks(&block_manager, &[(1100, &[1100, 1300]), (1150, &[1150])]).await;
+
+        let mut query = build_query(
+            1100,
+            1400,
+            QueryOptions {
+                only_metadata: true,
+                when: Some(serde_json::json!({"$limit": [2]})),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let records = read_to_vector(&mut query, block_manager).await;
+        let timestamps: Vec<_> = records
+            .iter()
+            .map(|(reader, _)| reader.meta().timestamp())
+            .collect();
+        assert_eq!(timestamps, [1100, 1150]);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn does_not_scan_block_at_exclusive_stop_time(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let mut query = build_query(1000, 1000, QueryOptions::default()).unwrap();
+
+        assert_eq!(
+            query.next(block_manager).await.err(),
+            Some(no_content!("No content"))
+        );
+        assert_eq!(query.last_scanned_block_id, None);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_skips_missing_block_descriptor_on_replica(
         #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) {
@@ -537,6 +666,82 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.meta().timestamp(), 0);
         assert_eq!(records[1].0.meta().timestamp(), 5);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retries_transient_replica_block_after_descriptor_becomes_available(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let source = block_manager.await;
+        let (path, bucket, entry, block_meta) = {
+            let mut bm = source.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            (
+                bm.path().clone(),
+                bm.bucket_name().to_string(),
+                bm.entry_name().to_string(),
+                bm.index().get_block(1000).unwrap().clone(),
+            )
+        };
+        FILE_CACHE.remove(&path.join("1000.meta")).await.unwrap();
+
+        let index = BlockIndex::try_load(path.clone().join("index"))
+            .await
+            .unwrap();
+        let replica = Arc::new(AsyncRwLock::new(
+            BlockManager::build(
+                path,
+                index,
+                bucket,
+                entry,
+                Arc::new(Cfg {
+                    role: InstanceRole::Replica,
+                    ..Default::default()
+                }),
+                Default::default(),
+            )
+            .await
+            .unwrap(),
+        ));
+
+        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
+        assert_eq!(
+            query
+                .next(replica.clone())
+                .await
+                .unwrap()
+                .meta()
+                .timestamp(),
+            0
+        );
+        assert_eq!(
+            query
+                .next(replica.clone())
+                .await
+                .unwrap()
+                .meta()
+                .timestamp(),
+            5
+        );
+        assert_eq!(
+            query.next(replica.clone()).await.err(),
+            Some(no_content!("No content"))
+        );
+
+        {
+            let mut bm = source.write().await.unwrap();
+            let block = bm.load_block(1000).await.unwrap();
+            bm.finish_block(block).await.unwrap();
+        }
+        replica
+            .write()
+            .await
+            .unwrap()
+            .index_mut()
+            .insert_or_update_with_crc(block_meta.clone(), block_meta.crc64.unwrap());
+
+        assert_eq!(query.next(replica).await.unwrap().meta().timestamp(), 1000);
     }
 
     #[rstest]
