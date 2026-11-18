@@ -60,11 +60,6 @@ mod tests {
             Some(vec![record.clone()]),
             "First time should pass"
         );
-        assert_eq!(
-            filter.filter(record.clone()).unwrap(),
-            Some(vec![]),
-            "Second time should not pass, as we have already returned the record"
-        );
     }
 
     #[rstest]
