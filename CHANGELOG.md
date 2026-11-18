@@ -13,10 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Coerce values of the `#strict` query directive with the same rules as condition values, [PR-1721](https://github.com/reductstore/reductstore/pull/1721)
 - Skip publication cycle for clean entry compaction, [PR-1704](https://github.com/reductstore/reductstore/pull/1704)
 - Hide retained attachment versions after removal so attachment listings do not expose deleted keys, [PR-1723](https://github.com/reductstore/reductstore/pull/1723)
-- Preserve acknowledged records across power loss by locally syncing publication batches and recovering valid WAL prefixes, [PR-1722](https://github.com/reductstore/reductstore/pull/1722)
-- Prevent replica index refreshes from blocking unrelated cached file reads, [PR-1713](https://github.com/reductstore/reductstore/pull/1713)
+- Preserve acknowledged records across power loss by locally syncing pu- Prevent replica index refreshes from blocking unrelated cached file reads, [PR-1713](https://github.com/reductstore/reductstore/pull/1713)
 - Retain the previous attachment version during replacement so replica listings cannot observe a missing attachment key, [PR-1712](https://github.com/reductstore/reductstore/pull/1712)
 - Retry replica queries after reloading indexes that disagree with cached block descriptors, [PR-1706](https://github.com/reductstore/reductstore/pull/1706)
 - Keep replica reads responsive while refreshed block indexes invalidate remote cache files, [PR-1703](https://github.com/reductstore/reductstore/pull/1703)

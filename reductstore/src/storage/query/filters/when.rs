@@ -7,13 +7,14 @@ mod io_cfg;
 mod select_labels;
 
 use crate::cfg::io::IoConfig;
-use crate::storage::query::condition::{BoxedNode, Context, Directives};
+use crate::storage::query::condition::{BoxedNode, Context, Directives, Value};
 use crate::storage::query::filters::when::ctx_after::CtxAfter;
 use crate::storage::query::filters::when::ctx_before::CtxBefore;
 use crate::storage::query::filters::when::io_cfg::merge_io_config_from_directives;
 use crate::storage::query::filters::when::select_labels::LabelSelector;
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
 use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::unprocessable_entity;
 use std::collections::VecDeque;
 
 pub(super) enum Padding {
@@ -41,6 +42,17 @@ impl<R> WhenFilter<R> {
         io_config: IoConfig,
         strict: bool,
     ) -> Result<Self, ReductError> {
+        let strict = match directives.remove("#strict") {
+            Some(values) => {
+                if values.len() != 1 {
+                    return Err(unprocessable_entity!(
+                        "#strict must be a single boolean value"
+                    ));
+                }
+                values.first().unwrap().as_bool()?
+            }
+            None => strict,
+        };
         Ok(Self {
             condition,
             strict,
@@ -50,6 +62,10 @@ impl<R> WhenFilter<R> {
             ctx_buffer: VecDeque::new(),
             io_config: merge_io_config_from_directives(&mut directives, io_config)?,
         })
+    }
+
+    pub fn strict(&self) -> bool {
+        self.strict
     }
 
     pub fn io_config(&self) -> &IoConfig {
@@ -372,6 +388,109 @@ mod tests {
                 ]))
                 .build()
                 .into()
+        }
+    }
+
+    mod strict_directive {
+        use super::*;
+
+        #[rstest]
+        fn test_strict_directive_true() {
+            let parser = Parser::new();
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#strict": true,
+                    "$and": [true]
+                }))
+                .unwrap();
+            let filter = WhenFilter::<TestFilterRecord>::try_new(
+                condition,
+                directives,
+                IoConfig::default(),
+                false,
+            )
+            .unwrap();
+            assert!(filter.strict());
+        }
+
+        #[rstest]
+        fn test_strict_directive_false() {
+            let parser = Parser::new();
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#strict": false,
+                    "$and": [true]
+                }))
+                .unwrap();
+            let filter = WhenFilter::<TestFilterRecord>::try_new(
+                condition,
+                directives,
+                IoConfig::default(),
+                true,
+            )
+            .unwrap();
+            assert!(!filter.strict());
+        }
+
+        #[rstest]
+        fn test_strict_directive_not_bool() {
+            let parser = Parser::new();
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#strict": "not_bool",
+                    "$and": [true]
+                }))
+                .unwrap();
+            let result = WhenFilter::<TestFilterRecord>::try_new(
+                condition,
+                directives,
+                IoConfig::default(),
+                true,
+            );
+            // The value is coerced like any condition value: a non-empty string is truthy
+            assert!(result.is_ok());
+            assert!(result.unwrap().strict());
+        }
+
+        #[rstest]
+        fn test_strict_directive_zero_is_falsy() {
+            let parser = Parser::new();
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#strict": 0,
+                    "$and": [true]
+                }))
+                .unwrap();
+            let result = WhenFilter::<TestFilterRecord>::try_new(
+                condition,
+                directives,
+                IoConfig::default(),
+                true,
+            );
+            assert!(result.is_ok());
+            assert!(!result.unwrap().strict());
+        }
+
+        #[rstest]
+        fn test_strict_directive_multiple_values() {
+            let parser = Parser::new();
+            let (condition, directives) = parser
+                .parse(json!({
+                    "#strict": [true, false],
+                    "$and": [true]
+                }))
+                .unwrap();
+            let result = WhenFilter::<TestFilterRecord>::try_new(
+                condition,
+                directives,
+                IoConfig::default(),
+                true,
+            );
+            assert!(result.is_err());
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] #strict must be a single boolean value"
+            );
         }
     }
 

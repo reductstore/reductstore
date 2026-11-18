@@ -26,11 +26,12 @@ use std::collections::HashMap;
 pub(crate) struct Parser {}
 
 pub(crate) type Directives = HashMap<String, Vec<Value>>;
-static DIRECTIVES: [&str; 10] = [
+static DIRECTIVES: [&str; 11] = [
     "#ctx_before",
     "#ctx_after",
     "#select_labels",
     "#ext",
+    "#strict",
     // query execution directives
     "#batch_size",
     "#batch_records",
@@ -614,6 +615,15 @@ mod tests {
                 result.err().unwrap().to_string(),
                 "[UnprocessableEntity] Directive '#batch_size' contains integer value out of range: 18446744073709551615"
             );
+        }
+
+        #[rstest]
+        fn test_parse_strict_directive(parser: Parser) {
+            let json = json!({
+                "#strict": true,
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(directives["#strict"], vec![Value::Bool(true)]);
         }
 
         #[rstest]

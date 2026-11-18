@@ -79,7 +79,9 @@ pub struct QueryEntry {
     /// Conditional query
     pub when: Option<Value>,
     /// Strict conditional query
-    /// If true, the query returns an error if any condition cannot be evaluated
+    /// If true, the query returns an error if any condition cannot be evaluated.
+    ///
+    /// Deprecated: use `#strict` directive in the `when` condition instead.
     pub strict: Option<bool>,
     /// Extension
     /// use nested objects to pass additional information to extensions
