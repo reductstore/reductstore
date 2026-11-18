@@ -30,10 +30,10 @@ impl<R: FilterRecord> RecordFilter<R> for TimeRangeFilter {
     fn filter(&mut self, record: R) -> Result<Option<Vec<R>>, ReductError> {
         let ts = record.timestamp();
         let ret = ts >= self.start && ts < self.stop;
-        if ret {
-            // Ensure that we don't return the same record twice
-            self.start = ts + 1;
-        }
+        // if ret {
+        //     // Ensure that we don't return the same record twice
+        //     self.start = ts + 1;
+        // }
 
         if ret {
             Ok(Some(vec![record]))
@@ -59,11 +59,6 @@ mod tests {
             filter.filter(record.clone()).unwrap(),
             Some(vec![record.clone()]),
             "First time should pass"
-        );
-        assert_eq!(
-            filter.filter(record.clone()).unwrap(),
-            Some(vec![]),
-            "Second time should not pass, as we have already returned the record"
         );
     }
 

@@ -14,11 +14,11 @@ use crate::storage::query::filters::{
     WhenFilter,
 };
 use async_trait::async_trait;
-use log::{debug, warn};
+use log::debug;
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
-use std::cmp::max;
 use std::collections::{HashMap, VecDeque};
+use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
 
 impl FilterRecord for Record {
@@ -58,7 +58,9 @@ pub struct HistoricalQuery {
     /// The records from the current block that have not been read yet.
     records_from_current_blocks: VecDeque<(usize, Record)>,
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
-    current_blocks: Vec<BlockRef>,
+    block_candidates: Vec<BlockRef>,
+    /// Last block scanned, so subsequent reads do not revisit it.
+    last_scanned_block_id: Option<u64>,
     /// Filters
     filters: Vec<Filter>,
     /// Request only metadata without the content.
@@ -109,7 +111,8 @@ impl HistoricalQuery {
             start_time,
             stop_time,
             records_from_current_blocks: VecDeque::new(),
-            current_blocks: Vec::new(),
+            block_candidates: Vec::new(),
+            last_scanned_block_id: None,
             filters,
             only_metadata,
             is_interrupted: false,
@@ -125,13 +128,23 @@ impl Query for HistoricalQuery {
         block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         if self.records_from_current_blocks.is_empty() && !self.is_interrupted {
-            assert!(self.current_blocks.is_empty());
-            let start = self.start_time;
-
-            let block_candidates = {
-                let first_block = {
+            self.block_candidates.clear();
+            let block_candidate_id = {
+                let first_block = if let Some(last_id) = self.last_scanned_block_id {
+                    let bm = block_manager.read().await?;
+                    match bm
+                        .index()
+                        .active_tree()
+                        .range((Excluded(last_id), Unbounded))
+                        .next()
+                        .copied()
+                    {
+                        Some(id) if id < self.stop_time => id,
+                        _ => return Err(ReductError::no_content("No content")),
+                    }
+                } else {
                     let mut bm = block_manager.write().await?;
-                    match bm.find_block_candidate(start).await {
+                    match bm.find_block_candidate(self.start_time).await {
                         Ok(block) => block.read().await?.block_id(),
                         Err(err) if err.status() == ErrorCode::TooEarly => {
                             debug!(
@@ -144,7 +157,7 @@ impl Query for HistoricalQuery {
                     }
                 };
 
-                let mut bm = block_manager.read().await?;
+                let bm = block_manager.read().await?;
                 let mut block_candidates = Vec::new();
                 if first_block <= self.stop_time {
                     let active_tree = bm.index().active_tree();
@@ -172,7 +185,13 @@ impl Query for HistoricalQuery {
                 block_candidates
             };
 
-            for block_id in block_candidates {
+            let Some(&last_id) = block_candidate_id.last() else {
+                return Err(ReductError::no_content("No content"));
+            };
+            self.last_scanned_block_id = Some(last_id);
+
+            let mut block_candidates = Vec::new();
+            for block_id in block_candidate_id {
                 let mut bm = block_manager.write().await?;
                 let block_result = match bm.find_cached_block(block_id) {
                     Some(block_ref) => Ok(block_ref),
@@ -197,15 +216,12 @@ impl Query for HistoricalQuery {
                     Err(err) => return Err(err),
                 };
 
-                self.current_blocks.push(block_ref.clone());
-                let mut found_records = self.filter_records_from_current_blocks().await?;
-                found_records.sort_by_key(|(_, rec)| ts_to_us(rec.timestamp.as_ref().unwrap()));
-
-                self.records_from_current_blocks.extend(found_records);
-                if !self.records_from_current_blocks.is_empty() {
-                    break;
-                }
+                block_candidates.push(block_ref);
             }
+
+            let found_records = self.filter_records_from_blocks(&block_candidates).await?;
+            self.records_from_current_blocks.extend(found_records);
+            self.block_candidates = block_candidates;
         }
 
         let Some((block_idx, record)) = self.records_from_current_blocks.pop_front() else {
@@ -217,7 +233,7 @@ impl Query for HistoricalQuery {
         } else {
             RecordReader::try_new(
                 Arc::clone(&block_manager),
-                self.current_blocks.get(block_idx).unwrap().clone(),
+                self.block_candidates.get(block_idx).unwrap().clone(),
                 ts_to_us(&record.timestamp.unwrap()),
                 Some(record),
                 None,
@@ -232,11 +248,12 @@ impl Query for HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    async fn filter_records_from_current_blocks(
+    async fn filter_records_from_blocks(
         &mut self,
+        block_candidates: &Vec<BlockRef>,
     ) -> Result<Vec<(usize, Record)>, ReductError> {
         let mut filtered_records = Vec::new();
-        for (block_id, block) in self.current_blocks.iter().enumerate() {
+        for (block_idx, block) in block_candidates.iter().enumerate() {
             for record in block.read().await?.record_index().values() {
                 match apply_filters_recursively(
                     self.filters.as_mut_slice(),
@@ -245,7 +262,7 @@ impl HistoricalQuery {
                 )? {
                     Some(records) => {
                         for record in records {
-                            filtered_records.push((block_id, record));
+                            filtered_records.push((block_idx, record));
                         }
                     }
                     None => {
@@ -261,6 +278,7 @@ impl HistoricalQuery {
             }
         }
 
+        filtered_records.sort_by_key(|(_, rec)| ts_to_us(rec.timestamp.as_ref().unwrap()));
         Ok(filtered_records)
     }
 }
