@@ -61,7 +61,7 @@ mod tests {
             "First time should pass"
         );
         assert_eq!(
-            filter.filter(record.clone()).unwrap(),
+            filter.filter(record).unwrap(),
             Some(vec![]),
             "Second time should not pass, as we have already returned the record"
         );

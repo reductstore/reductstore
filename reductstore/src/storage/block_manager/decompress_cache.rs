@@ -37,7 +37,7 @@ const UNLOCKED_DIR_MAX_IDLE: Duration = Duration::from_secs(3600);
 /// static keeps only a weak reference. When the last block manager and the last reader are
 /// dropped, `Drop for Inner` removes the temporary directory. Each handle has its own keys, so a
 /// re-created entry never gets files decompressed for the previous one under the same path.
-static SHARED_CACHE: Mutex<Weak<Inner>> = parking_lot::const_mutex(Weak::new());
+static SHARED_CACHE: Mutex<Weak<Inner>> = Mutex::new(Weak::new());
 /// Directories of killed processes are removed once per process, before the first cache is created.
 static REMOVE_STALE_DIRS: Once = Once::new();
 
@@ -1186,7 +1186,7 @@ mod tests {
     #[serial(decompress_cache)]
     async fn shared_cache_lives_while_any_handle_is_alive(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
-        let slot = parking_lot::const_mutex(Weak::new());
+        let slot = Mutex::new(Weak::new());
         let first = DecompressCache::shared_in(&slot, &dir, 1000, DECOMPRESS_CACHE_TTL);
         let second = DecompressCache::shared_in(&slot, &dir, 500, DECOMPRESS_CACHE_TTL);
         assert!(Arc::ptr_eq(&first.inner, &second.inner));

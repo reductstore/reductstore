@@ -43,6 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Publish entry mutations atomically for read-only replicas, [PR-1637](https://github.com/reductstore/reductstore/pull/1637) by @atimin
 - Replace formatted `ReductError` constructors with error macros, [PR-1631](https://github.com/reductstore/reductstore/pull/1631) by @vintcessun
 
+## 1.21.7 - 2026-11-13
+
+### Fixed
+
+- Return historical query records in timestamp order across overlapping blocks without loading unrelated block descriptors, [PR-1731](https://github.com/reductstore/reductstore/pull/1731)
+
 ## 1.21.6 - 2026-11-13
 
 ### Fixed

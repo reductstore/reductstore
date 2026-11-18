@@ -43,18 +43,18 @@ pub(crate) trait RecordFilter<R: FilterRecord> {
 
 pub(crate) fn apply_filters_recursively<R: FilterRecord>(
     filters: &mut [Box<dyn RecordFilter<R> + Send + Sync>],
-    notifications: Vec<R>,
+    records: Vec<R>,
     index: usize,
 ) -> Result<Option<Vec<R>>, ReductError> {
     if index == filters.len() {
-        return Ok(Some(notifications));
+        return Ok(Some(records));
     }
 
-    for notification in notifications {
-        match filters[index].filter(notification)? {
-            Some(notifications) => {
-                if !notifications.is_empty() {
-                    return apply_filters_recursively(filters, notifications, index + 1);
+    for record in records {
+        match filters[index].filter(record)? {
+            Some(records) => {
+                if !records.is_empty() {
+                    return apply_filters_recursively(filters, records, index + 1);
                 }
             }
 

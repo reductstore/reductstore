@@ -7,7 +7,7 @@ mod io_cfg;
 mod select_labels;
 
 use crate::cfg::io::IoConfig;
-use crate::storage::query::condition::{BoxedNode, Context, Directives, Value};
+use crate::storage::query::condition::{BoxedNode, Context, Directives};
 use crate::storage::query::filters::when::ctx_after::CtxAfter;
 use crate::storage::query::filters::when::ctx_before::CtxBefore;
 use crate::storage::query::filters::when::io_cfg::merge_io_config_from_directives;
@@ -64,6 +64,7 @@ impl<R> WhenFilter<R> {
         })
     }
 
+    #[cfg(test)]
     pub fn strict(&self) -> bool {
         self.strict
     }
