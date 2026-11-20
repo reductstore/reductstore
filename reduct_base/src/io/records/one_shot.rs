@@ -108,6 +108,7 @@ mod tests {
             content_type: "application/octet-stream".to_string(),
             content_length: 11,
             computed_labels: HashMap::new(),
+            block_id: None,
         }
     }
 
