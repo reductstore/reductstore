@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve the original storage block for historical query context records to avoid false `NotFound` errors when reading content across block boundaries, [#1735](https://github.com/reductstore/reductstore/pull/1735)
+
 ## 1.21.7 - 2026-11-13
 
 ### Fixed
