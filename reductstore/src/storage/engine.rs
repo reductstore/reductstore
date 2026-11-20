@@ -262,13 +262,21 @@ impl StorageEngine {
         content_size: u64,
         content_type: String,
         labels: Labels,
+        force_sync: bool,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_storage_limit(content_size).await?;
         let bucket = self.get_bucket(bucket_name).await?.upgrade()?;
         // Write traffic is counted at `RecordWriter` creation, alongside reads
         // at `RecordReader` creation.
         let writer = bucket
-            .begin_write(entry_name, time, content_size, content_type, labels)
+            .begin_write(
+                entry_name,
+                time,
+                content_size,
+                content_type,
+                labels,
+                force_sync,
+            )
             .await?;
         Ok(writer)
     }
