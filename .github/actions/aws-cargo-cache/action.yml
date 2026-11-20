@@ -110,7 +110,7 @@ runs:
       uses: runs-on/cache@v4
       with:
         path: target/
-        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-${{ github.sha }}
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
         restore-keys: |
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-
