@@ -1290,13 +1290,17 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn historical_query_finds_record_in_earlier_overlapping_block(path: PathBuf) {
+        async fn historical_query_finds_record_in_earlier_overlapping_block(
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
             let entry = entry(
                 EntrySettings {
                     max_block_size: 10000,
                     max_block_records: 3,
                 },
                 path,
+                file_cache,
             )
             .await;
 
