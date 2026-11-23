@@ -137,7 +137,7 @@ impl HistoricalQuery {
                 }
             } else {
                 let mut bm = block_manager.write().await?;
-                match bm.find_block_candidate(self.start_time).await {
+                match bm.find_query_block_candidate(self.start_time).await {
                     Ok(block) => block.read().await?.block_id(),
                     Err(err) if err.status() == ErrorCode::TooEarly => {
                         debug!(
@@ -187,10 +187,7 @@ impl HistoricalQuery {
         let mut block_candidates = Vec::new();
         for block_id in block_candidate_ids {
             let mut bm = block_manager.write().await?;
-            let block_result = match bm.find_cached_block(block_id) {
-                Some(block_ref) => Ok(block_ref),
-                None => bm.load_block(block_id).await,
-            };
+            let block_result = bm.load_block(block_id).await;
             let block_ref = match block_result {
                 Ok(block_ref) => block_ref,
                 Err(err) if err.status() == ErrorCode::TooEarly => {
