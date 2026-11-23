@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.21.8 - 2026-11-23
+
 ### Fixed
 
 - Include records from earlier overlapping blocks in historical queries after out-of-order writes, [#1746](https://github.com/reductstore/reductstore/pull/1746)
