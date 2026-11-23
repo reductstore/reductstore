@@ -10,6 +10,22 @@ impl BlockManager {
         self.load_block(id).await
     }
 
+    /// Finds the earliest overlapping predecessor so a forward query scan misses no records.
+    pub async fn find_query_block_candidate(
+        &mut self,
+        start: u64,
+    ) -> Result<BlockRef, ReductError> {
+        let floor_id = self.find_block_id(start)?;
+        let id = self
+            .block_index
+            .last_record_index()
+            .range(..floor_id)
+            .find(|(&id, &latest)| !self.block_index.is_corrupted(id) && latest >= start)
+            .map(|(&id, _)| id)
+            .unwrap_or(floor_id);
+        self.load_block(id).await
+    }
+
     /// Finds the block which contains a record with the exact timestamp.
     ///
     /// A belated write can create a block whose time range overlaps an earlier block. Search
@@ -59,12 +75,11 @@ impl BlockManager {
 
     fn find_block_id(&self, start: u64) -> Result<u64, ReductError> {
         self.block_index
-            .last_record_index()
-            .iter()
-            .find(|(&block_id, &last_ts)| {
-                !self.block_index.is_corrupted(block_id) && start <= last_ts && start >= block_id
-            })
-            .and_then(|(&block_id, _)| Some(block_id))
+            .block_ids()
+            .range(..=start)
+            .rev()
+            .find(|&&id| !self.block_index.is_corrupted(id))
+            .copied()
             .ok_or_else(|| {
                 ReductError::not_found(&format!(
                     "Record {} not found in entry {}/{}",
@@ -250,19 +265,30 @@ mod tests {
     }
 
     #[rstest]
-    #[case::inclusive_boundary(vec![(10, vec![10, 20, 40]), (30, vec![30])], 40)]
-    #[case::inside_overlap(vec![(10, vec![10, 20, 40]), (30, vec![30])], 35)]
+    #[case::inclusive_boundary(vec![(10, vec![10, 20, 40]), (30, vec![30])], 40, 10)]
+    #[case::inside_overlap(vec![(10, vec![10, 20, 40]), (30, vec![30])], 35, 10)]
     #[case::non_adjacent_overlap(
         vec![(10, vec![10, 100]), (20, vec![20, 25]), (30, vec![30, 35])],
-        90
+        90,
+        10
     )]
+    #[case::multiple_overlaps(vec![(10, vec![10, 100]), (30, vec![30, 90])], 80, 10)]
+    #[case::gap(vec![(10, vec![10, 20]), (30, vec![30, 40])], 25, 10)]
+    #[case::after_last_record(vec![(10, vec![10, 20]), (30, vec![30, 40])], 50, 30)]
     #[tokio::test]
-    async fn query_candidate_includes_earlier_overlapping_block(
+    async fn query_candidate_selects_earliest_overlap_or_floor(
         #[future] block_manager: BlockManager,
         #[case] blocks: Vec<(u64, Vec<u64>)>,
         #[case] start: u64,
+        #[case] expected_id: u64,
     ) {
         let mut bm = block_manager.await;
+        let floor_id = blocks
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| *id <= start)
+            .max()
+            .unwrap();
         for (block_id, timestamps) in blocks {
             let block = bm.start_new_block(block_id, 1024).await.unwrap();
             for timestamp in timestamps {
@@ -275,11 +301,14 @@ mod tests {
             bm.save_meta_on_disk(block).await.unwrap();
         }
 
-        let candidate = bm.find_block_candidate(start).await.unwrap();
+        let floor = bm.find_block_candidate(start).await.unwrap();
+        assert_eq!(floor.read().await.unwrap().block_id(), floor_id);
+
+        let candidate = bm.find_query_block_candidate(start).await.unwrap();
         assert_eq!(
             candidate.read().await.unwrap().block_id(),
-            10,
-            "query start {start} must not skip an earlier block whose range overlaps it"
+            expected_id,
+            "query start {start} must select the earliest overlap or fall back to the floor"
         );
     }
 
