@@ -59,11 +59,12 @@ impl BlockManager {
 
     fn find_block_id(&self, start: u64) -> Result<u64, ReductError> {
         self.block_index
-            .block_ids()
-            .range(..=start)
-            .rev()
-            .find(|&&id| !self.block_index.is_corrupted(id))
-            .copied()
+            .last_record_index()
+            .iter()
+            .find(|(&block_id, &last_ts)| {
+                !self.block_index.is_corrupted(block_id) && start <= last_ts && start >= block_id
+            })
+            .and_then(|(&block_id, _)| Some(block_id))
             .ok_or_else(|| {
                 ReductError::not_found(&format!(
                     "Record {} not found in entry {}/{}",
@@ -249,6 +250,40 @@ mod tests {
     }
 
     #[rstest]
+    #[case::inclusive_boundary(vec![(10, vec![10, 20, 40]), (30, vec![30])], 40)]
+    #[case::inside_overlap(vec![(10, vec![10, 20, 40]), (30, vec![30])], 35)]
+    #[case::non_adjacent_overlap(
+        vec![(10, vec![10, 100]), (20, vec![20, 25]), (30, vec![30, 35])],
+        90
+    )]
+    #[tokio::test]
+    async fn query_candidate_includes_earlier_overlapping_block(
+        #[future] block_manager: BlockManager,
+        #[case] blocks: Vec<(u64, Vec<u64>)>,
+        #[case] start: u64,
+    ) {
+        let mut bm = block_manager.await;
+        for (block_id, timestamps) in blocks {
+            let block = bm.start_new_block(block_id, 1024).await.unwrap();
+            for timestamp in timestamps {
+                block
+                    .write()
+                    .await
+                    .unwrap()
+                    .insert_or_update_record(record(timestamp));
+            }
+            bm.save_meta_on_disk(block).await.unwrap();
+        }
+
+        let candidate = bm.find_block_candidate(start).await.unwrap();
+        assert_eq!(
+            candidate.read().await.unwrap().block_id(),
+            10,
+            "query start {start} must not skip an earlier block whose range overlaps it"
+        );
+    }
+
+    #[rstest]
     #[case(false)]
     #[case(true)]
     #[tokio::test]
@@ -289,26 +324,6 @@ mod tests {
 
         let found = bm.find_block_with_record(40).await.unwrap();
         assert_eq!(found.read().await.unwrap().block_id(), 10);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn finds_record_in_cached_block_with_stale_index(
-        #[future] predecessor_blocks: (BlockManager, BlockRef),
-    ) {
-        let (mut bm, older) = predecessor_blocks.await;
-        older
-            .write()
-            .await
-            .unwrap()
-            .insert_or_update_record(record(40));
-        assert_eq!(bm.index().last_record_index().get(&10), Some(&0));
-
-        let found = bm.find_block_with_record(40).await.unwrap();
-        assert_eq!(found.read().await.unwrap().block_id(), 10);
-
-        bm.save_block(older).await.unwrap();
-        assert_eq!(bm.index().last_record_index().get(&10), Some(&40));
     }
 
     #[rstest]

@@ -779,6 +779,47 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn historical_query_finds_record_in_earlier_overlapping_block(path: PathBuf) {
+            let entry = entry(
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 3,
+                },
+                path,
+            )
+            .await;
+
+            // Block 10 contains record 40; the late write opens overlapping block 30.
+            for timestamp in [10, 20, 40, 30] {
+                write_stub_record(&entry, timestamp).await;
+            }
+
+            let id = entry
+                .query(QueryEntry {
+                    start: Some(40),
+                    stop: Some(50),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let (rx, _) = entry.get_query_receiver(id).await.unwrap();
+            let rx = rx.upgrade_and_unwrap();
+            let mut rx = rx.write().await.unwrap();
+
+            let reader = rx
+                .recv()
+                .await
+                .unwrap()
+                .expect("query must find record 40 in the earlier overlapping block");
+            assert_eq!(reader.meta().timestamp(), 40);
+            assert_eq!(
+                rx.recv().await.unwrap().err(),
+                Some(no_content!("No content"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn reject_reversed_historical_query_range(#[future] entry: Arc<Entry>) {
             let entry = entry.await;
             write_stub_record(&entry, 1000000).await;
