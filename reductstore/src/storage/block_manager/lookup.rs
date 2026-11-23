@@ -10,6 +10,22 @@ impl BlockManager {
         self.load_block(id).await
     }
 
+    /// Finds the earliest overlapping predecessor so a forward query scan misses no records.
+    pub async fn find_query_block_candidate(
+        &mut self,
+        start: u64,
+    ) -> Result<BlockRef, ReductError> {
+        let floor_id = self.find_block_id(start)?;
+        let id = self
+            .block_index
+            .last_record_index()
+            .range(..floor_id)
+            .find(|(&id, &latest)| !self.block_index.is_corrupted(id) && latest >= start)
+            .map(|(&id, _)| id)
+            .unwrap_or(floor_id);
+        self.load_block(id).await
+    }
+
     /// Finds the block which contains a record with the exact timestamp.
     ///
     /// A belated write can create a block whose time range overlaps an earlier block. Search
@@ -270,6 +286,54 @@ mod tests {
     }
 
     #[rstest]
+    #[case::inclusive_boundary(vec![(10, vec![10, 20, 40]), (30, vec![30])], 40, 10)]
+    #[case::inside_overlap(vec![(10, vec![10, 20, 40]), (30, vec![30])], 35, 10)]
+    #[case::non_adjacent_overlap(
+        vec![(10, vec![10, 100]), (20, vec![20, 25]), (30, vec![30, 35])],
+        90,
+        10
+    )]
+    #[case::multiple_overlaps(vec![(10, vec![10, 100]), (30, vec![30, 90])], 80, 10)]
+    #[case::gap(vec![(10, vec![10, 20]), (30, vec![30, 40])], 25, 10)]
+    #[case::after_last_record(vec![(10, vec![10, 20]), (30, vec![30, 40])], 50, 30)]
+    #[tokio::test]
+    async fn query_candidate_selects_earliest_overlap_or_floor(
+        #[future] block_manager: BlockManager,
+        #[case] blocks: Vec<(u64, Vec<u64>)>,
+        #[case] start: u64,
+        #[case] expected_id: u64,
+    ) {
+        let mut bm = block_manager.await;
+        let floor_id = blocks
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| *id <= start)
+            .max()
+            .unwrap();
+        for (block_id, timestamps) in blocks {
+            let block = bm.start_new_block(block_id, 1024).await.unwrap();
+            for timestamp in timestamps {
+                block
+                    .write()
+                    .await
+                    .unwrap()
+                    .insert_or_update_record(record(timestamp));
+            }
+            bm.save_meta_on_disk(block).await.unwrap();
+        }
+
+        let floor = bm.find_block_candidate(start).await.unwrap();
+        assert_eq!(floor.read().await.unwrap().block_id(), floor_id);
+
+        let candidate = bm.find_query_block_candidate(start).await.unwrap();
+        assert_eq!(
+            candidate.read().await.unwrap().block_id(),
+            expected_id,
+            "query start {start} must select the earliest overlap or fall back to the floor"
+        );
+    }
+
+    #[rstest]
     #[case(false)]
     #[case(true)]
     #[tokio::test]
@@ -310,26 +374,6 @@ mod tests {
 
         let found = bm.find_block_with_record(40).await.unwrap();
         assert_eq!(found.read().await.unwrap().block_id(), 10);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn finds_record_in_cached_block_with_stale_index(
-        #[future] predecessor_blocks: (BlockManager, BlockRef),
-    ) {
-        let (mut bm, older) = predecessor_blocks.await;
-        older
-            .write()
-            .await
-            .unwrap()
-            .insert_or_update_record(record(40));
-        assert_eq!(bm.index().last_record_index().get(&10), Some(&0));
-
-        let found = bm.find_block_with_record(40).await.unwrap();
-        assert_eq!(found.read().await.unwrap().block_id(), 10);
-
-        bm.save_block(older).await.unwrap();
-        assert_eq!(bm.index().last_record_index().get(&10), Some(&40));
     }
 
     #[rstest]

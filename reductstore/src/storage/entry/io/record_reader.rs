@@ -5,7 +5,6 @@ use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockFilePath, BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
-use crate::storage::proto::Record;
 use bytes::Bytes;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
@@ -48,7 +47,7 @@ impl RecordReader {
         block_manager: Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,
         record_timestamp: u64,
-        processed_record: Option<Record>,
+        processed_record: Option<RecordMeta>,
         permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Self, ReductError> {
         let bm = block_manager.read().await?;
@@ -67,13 +66,14 @@ impl RecordReader {
 
         let meta: RecordMeta = {
             let meta = if let Some(processed_record) = processed_record {
-                processed_record.into()
+                processed_record
             } else {
                 record.clone().into()
             };
 
             RecordMeta::builder_from(meta)
                 .entry_name(bm.entry_name().clone())
+                .block_id(Some(block.block_id()))
                 .build()
         };
 
@@ -124,7 +124,7 @@ impl RecordReader {
     /// # Returns
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks
-    pub fn form_record(entry_name: &str, record: Record) -> Self {
+    pub fn form_record(entry_name: &str, record: impl Into<RecordMeta>) -> Self {
         let meta: RecordMeta = RecordMeta::builder_from(record.into())
             .entry_name(entry_name)
             .build();
@@ -286,6 +286,7 @@ pub(in crate::storage) async fn read_in_chunks(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::storage::proto::Record;
 
     use crate::core::file_cache::build_test_file_cache;
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;

@@ -5,8 +5,7 @@ use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
-use crate::storage::proto::record;
-use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
+use crate::storage::proto::record::State as RecordState;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
@@ -17,36 +16,34 @@ use async_trait::async_trait;
 use log::debug;
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
+use reduct_base::io::RecordMeta;
 use std::collections::{HashMap, VecDeque};
 use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
 
-impl FilterRecord for Record {
+impl FilterRecord for RecordMeta {
     fn state(&self) -> i32 {
-        self.state
+        self.state()
     }
 
     fn timestamp(&self) -> u64 {
-        self.timestamp.as_ref().map_or(0, |ts| ts_to_us(ts))
+        self.timestamp()
     }
 
     fn labels(&self) -> HashMap<&String, &String> {
-        HashMap::from_iter(self.labels.iter().map(|label| (&label.name, &label.value)))
+        self.labels().iter().collect()
     }
 
     fn set_labels(&mut self, labels: HashMap<String, String>) {
-        self.labels = labels
-            .into_iter()
-            .map(|(k, v)| record::Label { name: k, value: v })
-            .collect();
+        *self.labels_mut() = labels;
     }
 
     fn computed_labels(&self) -> HashMap<&String, &String> {
-        HashMap::new()
+        self.computed_labels().iter().collect()
     }
 }
 
-type Filter = Box<dyn RecordFilter<Record> + Send + Sync>;
+type Filter = Box<dyn RecordFilter<RecordMeta> + Send + Sync>;
 
 pub struct HistoricalQuery {
     /// The start time of the query.
@@ -56,7 +53,7 @@ pub struct HistoricalQuery {
     /// Entry name
     entry_name: String,
     /// The records from the current block that have not been read yet.
-    records_from_current_blocks: VecDeque<(usize, Record)>,
+    records_from_current_blocks: VecDeque<RecordMeta>,
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
     block_candidates: Vec<BlockRef>,
     /// Last block scanned, so subsequent reads do not revisit it.
@@ -140,7 +137,7 @@ impl HistoricalQuery {
                 }
             } else {
                 let mut bm = block_manager.write().await?;
-                match bm.find_block_candidate(self.start_time).await {
+                match bm.find_query_block_candidate(self.start_time).await {
                     Ok(block) => block.read().await?.block_id(),
                     Err(err) if err.status() == ErrorCode::TooEarly => return Err(err),
                     Err(_) => 0,
@@ -184,10 +181,7 @@ impl HistoricalQuery {
         let mut block_candidates = Vec::new();
         for &block_id in &block_candidate_ids {
             let mut bm = block_manager.write().await?;
-            let block_result = match bm.find_cached_block(block_id) {
-                Some(block_ref) => Ok(block_ref),
-                None => bm.load_block(block_id).await,
-            };
+            let block_result = bm.load_block(block_id).await;
             let block_ref = match block_result {
                 Ok(block_ref) => block_ref,
                 Err(err) if err.status() == ErrorCode::TooEarly => return Err(err),
@@ -229,17 +223,32 @@ impl Query for HistoricalQuery {
             }
         }
 
-        let Some((block_idx, record)) = self.records_from_current_blocks.pop_front() else {
+        let Some(record) = self.records_from_current_blocks.pop_front() else {
             return Err(ReductError::no_content("No content"));
         };
 
         if self.only_metadata {
             Ok(RecordReader::form_record(&self.entry_name, record))
         } else {
+            let block_id = record.block_id().ok_or_else(|| {
+                reduct_base::internal_server_error!("Historical record has no block ID")
+            })?;
+            let mut block = None;
+            for candidate in &self.block_candidates {
+                if candidate.read().await?.block_id() == block_id {
+                    block = Some(candidate.clone());
+                    break;
+                }
+            }
+            let block = match block {
+                Some(block) => block,
+                None => block_manager.write().await?.load_block(block_id).await?,
+            };
+
             RecordReader::try_new(
                 Arc::clone(&block_manager),
-                self.block_candidates.get(block_idx).unwrap().clone(),
-                ts_to_us(&record.timestamp.unwrap()),
+                block,
+                record.timestamp(),
                 Some(record),
                 None,
             )
@@ -256,24 +265,26 @@ impl HistoricalQuery {
     async fn filter_records_from_blocks(
         &mut self,
         block_candidates: &Vec<BlockRef>,
-    ) -> Result<Vec<(usize, Record)>, ReductError> {
+    ) -> Result<Vec<RecordMeta>, ReductError> {
         let mut unfiltered_records = Vec::new();
-        let mut filtered_records: Vec<(usize, Record)> = Vec::new();
-        for (block_idx, block) in block_candidates.iter().enumerate() {
-            for record in block.read().await?.record_index().values() {
-                unfiltered_records.push((block_idx, record.clone()));
+        let mut filtered_records = Vec::new();
+        for block in block_candidates.iter() {
+            let blk = block.read().await?;
+            for record in blk.record_index().values() {
+                unfiltered_records.push(
+                    RecordMeta::builder_from(record.clone().into())
+                        .block_id(Some(blk.block_id()))
+                        .build(),
+                );
             }
         }
 
         // we need sorted data before applying filters
-        unfiltered_records
-            .sort_by_key(|(_, rec): &(_, _)| ts_to_us(rec.timestamp.as_ref().unwrap()));
-        for (block_idx, record) in unfiltered_records {
-            match apply_filters_recursively(self.filters.as_mut_slice(), vec![record.clone()], 0)? {
+        unfiltered_records.sort_by_key(|record| record.timestamp());
+        for record in unfiltered_records {
+            match apply_filters_recursively(self.filters.as_mut_slice(), vec![record], 0)? {
                 Some(records) => {
-                    for record in records {
-                        filtered_records.push((block_idx, record));
-                    }
+                    filtered_records.extend(records);
                 }
                 None => {
                     // If the filtering is interrupted, we stop processing further records.
@@ -393,23 +404,24 @@ mod tests {
 
         #[test]
         fn test_set_labels() {
-            let mut record = Record {
+            let mut record: RecordMeta = Record {
                 timestamp: Some(us_to_ts(&100)),
                 begin: 0,
                 end: 10,
                 state: record::State::Finished as i32,
                 labels: vec![],
                 content_type: "text/plain".to_string(),
-            };
+            }
+            .into();
 
             let new_labels = HashMap::from([
                 ("key1".to_string(), "value1".to_string()),
                 ("key2".to_string(), "value2".to_string()),
             ]);
 
-            record.set_labels(new_labels);
+            FilterRecord::set_labels(&mut record, new_labels);
 
-            assert_eq!(record.labels.len(), 2);
+            assert_eq!(record.labels().len(), 2);
             assert_eq!(record.labels()[&"key1".to_string()], "value1");
             assert_eq!(record.labels()[&"key2".to_string()], "value2");
         }
@@ -804,6 +816,65 @@ mod tests {
 
     mod filtering {
         use super::*;
+
+        #[rstest]
+        #[case::separate_block_groups(false)]
+        #[case::overlapping_blocks(true)]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn reads_context_before_content_across_block_boundaries(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[case] overlapping: bool,
+        ) {
+            let block_manager = block_manager.await;
+            if overlapping {
+                let mut bm = block_manager.write().await.unwrap();
+                let block_ref = bm.load_block(0).await.unwrap();
+                {
+                    let mut block = block_ref.write().await.unwrap();
+                    let mut record = block.get_record(0).unwrap().clone();
+                    record.timestamp = Some(us_to_ts(&2000));
+                    block.insert_or_update_record(record);
+                }
+                bm.save_block(block_ref).await.unwrap();
+            }
+            let mut query = build_query(
+                0,
+                1001,
+                QueryOptions {
+                    only_metadata: false,
+                    when: Some(serde_json::json!({
+                        "#ctx_before": "4s",
+                        "&block": {"$eq": 2}
+                    })),
+                    ..QueryOptions::default()
+                },
+            )
+            .unwrap();
+
+            // Only timestamp 1000 matches; timestamps 0 and 5 belong to the previous block.
+            for timestamp in [0, 5, 1000] {
+                let mut reader = query
+                    .next(block_manager.clone())
+                    .await
+                    .expect("context record must be read from its original block");
+                assert_eq!(reader.meta().timestamp(), timestamp);
+                assert_eq!(
+                    reader.meta().block_id(),
+                    Some(if timestamp == 1000 { 1000 } else { 0 })
+                );
+
+                let mut content = Vec::new();
+                while let Some(chunk) = reader.read_chunk() {
+                    content.extend_from_slice(&chunk.unwrap());
+                }
+                assert_eq!(content, b"0123456789");
+            }
+
+            assert_eq!(
+                query.next(block_manager).await.err(),
+                Some(no_content!("No content"))
+            );
+        }
 
         #[rstest]
         #[tokio::test(flavor = "multi_thread")]

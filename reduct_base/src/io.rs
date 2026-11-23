@@ -23,6 +23,7 @@ pub struct RecordMeta {
     content_type: String,
     content_length: u64,
     computed_labels: Labels,
+    block_id: Option<u64>,
 }
 
 pub struct BuilderRecordMeta {
@@ -33,6 +34,7 @@ pub struct BuilderRecordMeta {
     content_type: String,
     content_length: u64,
     computed_labels: Labels,
+    block_id: Option<u64>,
 }
 
 impl BuilderRecordMeta {
@@ -77,6 +79,11 @@ impl BuilderRecordMeta {
         self
     }
 
+    pub fn block_id(mut self, block_id: Option<u64>) -> Self {
+        self.block_id = block_id;
+        self
+    }
+
     /// Builds a `RecordMeta` instance from the builder.
     pub fn build(self) -> RecordMeta {
         RecordMeta {
@@ -87,6 +94,7 @@ impl BuilderRecordMeta {
             content_type: self.content_type,
             content_length: self.content_length,
             computed_labels: self.computed_labels,
+            block_id: self.block_id,
         }
     }
 }
@@ -102,6 +110,7 @@ impl RecordMeta {
             content_type: "application/octet-stream".to_string(),
             content_length: 0,
             computed_labels: Labels::new(),
+            block_id: None,
         }
     }
 
@@ -115,6 +124,7 @@ impl RecordMeta {
             content_type: meta.content_type,
             content_length: meta.content_length,
             computed_labels: meta.computed_labels,
+            block_id: meta.block_id,
         }
     }
 
@@ -165,6 +175,11 @@ impl RecordMeta {
     /// Returns the content type of the record as a MIME type.
     pub fn content_type(&self) -> &str {
         &self.content_type
+    }
+
+    /// Returns the block ID associated with the record, if any.
+    pub fn block_id(&self) -> Option<u64> {
+        self.block_id
     }
 }
 
@@ -222,6 +237,17 @@ pub(crate) mod tests {
             assert_eq!(new_meta.state(), 1);
             assert_eq!(new_meta.content_type(), "application/json");
             assert_eq!(new_meta.content_length(), 1024);
+        }
+
+        #[rstest]
+        #[case(None)]
+        #[case(Some(0))]
+        #[case(Some(1000))]
+        fn preserves_block_id(#[case] block_id: Option<u64>) {
+            let meta = RecordMeta::builder().block_id(block_id).build();
+            assert_eq!(meta.block_id(), block_id);
+            assert_eq!(meta.clone().block_id(), block_id);
+            assert_eq!(RecordMeta::builder_from(meta).build().block_id(), block_id);
         }
 
         #[fixture]
