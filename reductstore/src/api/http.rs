@@ -374,6 +374,29 @@ pub(crate) mod tests {
         let data = std::fs::read(entry_path.join(format!("{block_id}.blk"))).unwrap();
         assert_eq!(&data[record.begin as usize..record.end as usize], content);
     }
+
+    pub(crate) fn assert_record_not_persisted(
+        entry_path: &std::path::Path,
+        block_id: u64,
+        timestamp: u64,
+    ) {
+        use crate::storage::proto::{record, ts_to_us, Block};
+        use prost::Message;
+
+        let metadata = match std::fs::read(entry_path.join(format!("{block_id}.meta"))) {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+            Err(err) => panic!("failed to read metadata: {err}"),
+        };
+        let block = Block::decode(metadata.as_slice()).unwrap();
+        assert!(
+            !block.records.iter().any(|record| {
+                ts_to_us(record.timestamp.as_ref().unwrap()) == timestamp
+                    && record.state == record::State::Finished as i32
+            }),
+            "finished metadata should remain deferred without forced sync"
+        );
+    }
     use crate::api::components::ComponentError;
     use crate::api::limits::{LimitsBuilder, LimitsConfig, WindowLimit};
     use crate::asset::asset_manager::create_asset_manager;

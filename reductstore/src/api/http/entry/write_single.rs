@@ -169,22 +169,24 @@ mod tests {
     use tokio::time::{sleep, Duration};
 
     #[rstest]
-    #[case(false)]
-    #[case(true)]
+    #[case::absent(None, false)]
+    #[case::disabled(Some("false"), false)]
+    #[case::enabled(Some("true"), true)]
+    #[case::invalid(Some("invalid"), false)]
     #[tokio::test]
     async fn test_write_with_label_ok(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
+        #[case] sync_header: Option<&str>,
         #[case] force_sync: bool,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
-        headers.insert(
-            "x-reduct-sync-write",
-            force_sync.to_string().parse().unwrap(),
-        );
+        if let Some(value) = sync_header {
+            headers.insert("x-reduct-sync-write", value.parse().unwrap());
+        }
         write_record(
             State(keeper),
             headers,
@@ -198,18 +200,20 @@ mod tests {
         .await
         .unwrap();
 
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
         if force_sync {
-            let entry = components
-                .storage
-                .get_bucket("bucket-1")
-                .await
-                .unwrap()
-                .upgrade_and_unwrap()
-                .get_entry("entry-1")
-                .await
-                .unwrap()
-                .upgrade_and_unwrap();
             crate::api::http::tests::assert_record_persisted(entry.path(), 0, 1, b"");
+        } else {
+            crate::api::http::tests::assert_record_not_persisted(entry.path(), 0, 1);
         }
 
         let record = components

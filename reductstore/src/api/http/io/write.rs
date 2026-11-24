@@ -374,13 +374,16 @@ mod tests {
     use std::time::Duration;
 
     #[rstest]
-    #[case(false)]
-    #[case(true)]
+    #[case::absent(None, false)]
+    #[case::disabled(Some("false"), false)]
+    #[case::enabled(Some("true"), true)]
+    #[case::invalid(Some("invalid"), false)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records_multiple_entries(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_bucket_1: Path<HashMap<String, String>>,
+        #[case] sync_header: Option<&str>,
         #[case] force_sync: bool,
     ) {
         let keeper = keeper.await;
@@ -394,10 +397,9 @@ mod tests {
             .await
             .unwrap();
         headers.insert("content-length", HeaderValue::from_static("10"));
-        headers.insert(
-            "x-reduct-sync-write",
-            force_sync.to_string().parse().unwrap(),
-        );
+        if let Some(value) = sync_header {
+            headers.insert("x-reduct-sync-write", value.parse().unwrap());
+        }
         headers.insert(
             "x-reduct-entries",
             HeaderValue::from_str(
@@ -441,23 +443,29 @@ mod tests {
             .unwrap()
             .upgrade_and_unwrap();
 
-        if force_sync {
-            for (entry_name, block_id, timestamp, content) in [
-                ("entry-1", 0, 1000, b"aaaa".as_slice()),
-                ("entry-1", 0, 1010, b"bb".as_slice()),
-                ("entry-2", 1000, 1000, b"CCC".as_slice()),
-                ("entry-2", 1000, 1005, b"d".as_slice()),
-            ] {
-                let entry = bucket
-                    .get_entry(entry_name)
-                    .await
-                    .unwrap()
-                    .upgrade_and_unwrap();
+        for (entry_name, block_id, timestamp, content) in [
+            ("entry-1", 0, 1000, b"aaaa".as_slice()),
+            ("entry-1", 0, 1010, b"bb".as_slice()),
+            ("entry-2", 1000, 1000, b"CCC".as_slice()),
+            ("entry-2", 1000, 1005, b"d".as_slice()),
+        ] {
+            let entry = bucket
+                .get_entry(entry_name)
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            if force_sync {
                 crate::api::http::tests::assert_record_persisted(
                     entry.path(),
                     block_id,
                     timestamp,
                     content,
+                );
+            } else {
+                crate::api::http::tests::assert_record_not_persisted(
+                    entry.path(),
+                    block_id,
+                    timestamp,
                 );
             }
         }

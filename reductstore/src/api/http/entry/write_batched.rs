@@ -387,14 +387,17 @@ mod tests {
     }
 
     #[rstest]
-    #[case(false)]
-    #[case(true)]
+    #[case::absent(None, false)]
+    #[case::disabled(Some("false"), false)]
+    #[case::enabled(Some("true"), true)]
+    #[case::invalid(Some("invalid"), false)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
+        #[case] sync_header: Option<&str>,
         #[case] force_sync: bool,
     ) {
         let keeper = keeper.await;
@@ -408,10 +411,9 @@ mod tests {
             .await
             .unwrap();
         headers.insert("content-length", "48".parse().unwrap());
-        headers.insert(
-            "x-reduct-sync-write",
-            force_sync.to_string().parse().unwrap(),
-        );
+        if let Some(value) = sync_header {
+            headers.insert("x-reduct-sync-write", value.parse().unwrap());
+        }
         headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
         headers.insert(
             "x-reduct-time-2",
@@ -432,23 +434,25 @@ mod tests {
             .unwrap()
             .upgrade_and_unwrap();
 
-        if force_sync {
-            let entry = bucket
-                .get_entry("entry-1")
-                .await
-                .unwrap()
-                .upgrade_and_unwrap();
-            for (timestamp, content) in [
-                (1, b"1234567890".as_slice()),
-                (2, b"abcdef1234567890abcd".as_slice()),
-                (10, b"ef1234567890abcdef".as_slice()),
-            ] {
+        let entry = bucket
+            .get_entry("entry-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        for (timestamp, content) in [
+            (1, b"1234567890".as_slice()),
+            (2, b"abcdef1234567890abcd".as_slice()),
+            (10, b"ef1234567890abcdef".as_slice()),
+        ] {
+            if force_sync {
                 crate::api::http::tests::assert_record_persisted(
                     entry.path(),
                     0,
                     timestamp,
                     content,
                 );
+            } else {
+                crate::api::http::tests::assert_record_not_persisted(entry.path(), 0, timestamp);
             }
         }
 
