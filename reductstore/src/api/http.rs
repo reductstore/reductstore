@@ -19,7 +19,7 @@ use crate::api::http::io::create_io_api_routes;
 use crate::api::http::ui::{redirect_to_index, show_ui};
 use crate::cfg::Cfg;
 use crate::lock_file::BoxedLockFile;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{
@@ -35,9 +35,9 @@ use middleware::{
     attach_client_ip, audit_requests, check_api_rate_limit, default_headers, print_statuses,
     validate_replication_identity,
 };
-use reduct_base::bad_request;
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
+use reduct_base::{bad_request, internal_server_error};
 use replication::create_replication_api_routes;
 use serde::de::StdError;
 use server::create_server_api_routes;
@@ -47,6 +47,8 @@ use token::create_token_api_routes;
 use tokio::sync::mpsc::Receiver;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::decompression::RequestDecompressionLayer;
+
+const SYNC_WRITE_HEADER: &str = "x-reduct-sync-write";
 
 #[derive(PartialEq, Clone)]
 pub struct HttpError {
@@ -302,9 +304,136 @@ impl AxumAppBuilder {
     }
 }
 
+pub(super) fn check_and_get_force_sync(headers: &HeaderMap) -> bool {
+    headers
+        .get(SYNC_WRITE_HEADER)
+        .map(|value| value == "true")
+        .unwrap_or(false)
+}
+
+pub(super) async fn sync_entry(
+    components: Arc<Components>,
+    bucket: &str,
+    entry_name: &str,
+) -> Result<(), HttpError> {
+    let entry = components
+        .storage
+        .get_bucket(&bucket)
+        .await?
+        .upgrade()?
+        .get_entry(&entry_name)
+        .await?
+        .upgrade()?;
+
+    entry.sync_fs().await.map_err(|e| {
+        internal_server_error!(
+            "Failed to sync entry {}/{} to disk: {}",
+            bucket,
+            entry_name,
+            e
+        )
+    })?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[rstest::rstest]
+    #[case(None, false)]
+    #[case(Some("false"), false)]
+    #[case(Some("true"), true)]
+    #[case(Some("TRUE"), false)]
+    #[case(Some("invalid"), false)]
+    fn test_check_and_get_force_sync(#[case] value: Option<&str>, #[case] expected: bool) {
+        let mut headers = HeaderMap::new();
+        if let Some(value) = value {
+            headers.insert(SYNC_WRITE_HEADER, value.parse().unwrap());
+        }
+        assert_eq!(check_and_get_force_sync(&headers), expected);
+    }
+
+    #[rstest::rstest]
+    #[case::descriptor("0.meta")]
+    #[case::index("blocks.idx")]
+    #[tokio::test]
+    async fn test_sync_entry_reports_persistence_failure(
+        #[future] keeper: Arc<StateKeeper>,
+        #[case] filename: &str,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        let path = entry.path().join(filename);
+
+        // Evict the cached descriptor so the next write encounters the directory.
+        components.storage.file_cache().remove(&path).await.unwrap();
+        std::fs::create_dir(&path).unwrap();
+
+        let err = sync_entry(components, "bucket-1", "entry-1")
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err
+            .message()
+            .starts_with("Failed to sync entry bucket-1/entry-1 to disk: "));
+        assert!(err.message().len() > "Failed to sync entry bucket-1/entry-1 to disk: ".len());
+    }
+
+    pub(crate) fn assert_record_persisted(
+        entry_path: &std::path::Path,
+        block_id: u64,
+        timestamp: u64,
+        content: &[u8],
+    ) {
+        use crate::storage::proto::{record, ts_to_us, Block};
+        use prost::Message;
+
+        let metadata = std::fs::read(entry_path.join(format!("{block_id}.meta"))).unwrap();
+        let block = Block::decode(metadata.as_slice()).unwrap();
+        let record = block
+            .records
+            .iter()
+            .find(|record| ts_to_us(record.timestamp.as_ref().unwrap()) == timestamp)
+            .expect("record must be persisted before the response");
+        assert_eq!(record.state, record::State::Finished as i32);
+        let data = std::fs::read(entry_path.join(format!("{block_id}.blk"))).unwrap();
+        assert_eq!(&data[record.begin as usize..record.end as usize], content);
+    }
+
+    pub(crate) fn assert_record_not_persisted(
+        entry_path: &std::path::Path,
+        block_id: u64,
+        timestamp: u64,
+    ) {
+        use crate::storage::proto::{record, ts_to_us, Block};
+        use prost::Message;
+
+        let metadata = match std::fs::read(entry_path.join(format!("{block_id}.meta"))) {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+            Err(err) => panic!("failed to read metadata: {err}"),
+        };
+        let block = Block::decode(metadata.as_slice()).unwrap();
+        assert!(
+            !block.records.iter().any(|record| {
+                ts_to_us(record.timestamp.as_ref().unwrap()) == timestamp
+                    && record.state == record::State::Finished as i32
+            }),
+            "finished metadata should remain deferred without forced sync"
+        );
+    }
     use crate::api::components::ComponentError;
     use crate::api::limits::{LimitsBuilder, LimitsConfig, WindowLimit};
     use crate::asset::asset_manager::create_asset_manager;

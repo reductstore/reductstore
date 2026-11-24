@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::components::CLIENT_IP_HEADER;
-use crate::api::http::HttpError;
+use crate::api::http::{check_and_get_force_sync, sync_entry, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -95,6 +95,7 @@ pub(super) async fn write_record(
         Ok((ts, labels, sender))
     };
 
+    let force_sync = check_and_get_force_sync(&headers);
     let io_timeout = components.cfg.io_conf.operation_timeout;
     match check_request_and_get_sender.await {
         Ok((ts, labels, mut writer)) => {
@@ -121,9 +122,7 @@ pub(super) async fn write_record(
                 send_chunk!(chunk);
             }
 
-            if let Err(err) = writer.send_timeout(Ok(None), io_timeout).await {
-                debug!("Timeout while sending EOF: {}", err);
-            }
+            writer.send_timeout(Ok(None), io_timeout).await?;
 
             components
                 .replication_repo
@@ -136,6 +135,10 @@ pub(super) async fn write_record(
                     event: WriteRecord(ts),
                 })
                 .await?;
+
+            if force_sync {
+                sync_entry(components.clone(), &bucket, path.get("entry_name").unwrap()).await?;
+            }
             Ok(())
         }
         Err(e) => {
@@ -166,15 +169,24 @@ mod tests {
     use tokio::time::{sleep, Duration};
 
     #[rstest]
+    #[case::absent(None, false)]
+    #[case::disabled(Some("false"), false)]
+    #[case::enabled(Some("true"), true)]
+    #[case::invalid(Some("invalid"), false)]
     #[tokio::test]
     async fn test_write_with_label_ok(
         #[future] keeper: Arc<StateKeeper>,
-        headers: HeaderMap,
+        mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
+        #[case] sync_header: Option<&str>,
+        #[case] force_sync: bool,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
+        if let Some(value) = sync_header {
+            headers.insert("x-reduct-sync-write", value.parse().unwrap());
+        }
         write_record(
             State(keeper),
             headers,
@@ -187,6 +199,22 @@ mod tests {
         )
         .await
         .unwrap();
+
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        if force_sync {
+            crate::api::http::tests::assert_record_persisted(entry.path(), 0, 1, b"");
+        } else {
+            crate::api::http::tests::assert_record_not_persisted(entry.path(), 0, 1);
+        }
 
         let record = components
             .storage

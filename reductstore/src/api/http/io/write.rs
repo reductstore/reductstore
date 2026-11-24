@@ -3,7 +3,8 @@
 
 use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::entry::common::parse_content_length_from_header;
-use crate::api::http::Components;
+use crate::api::http::utils::write_chunk;
+use crate::api::http::{check_and_get_force_sync, sync_entry, Components};
 use crate::api::http::{HttpError, StateKeeper};
 use crate::api::limits::limit_scope_from_client_ip;
 use crate::auth::policy::WriteAccessPolicy;
@@ -64,6 +65,7 @@ pub(super) async fn write_batched_records(
     let start_ts = parse_start_timestamp(&headers)?;
     let parsed_headers = parse_and_index_headers(&entries, &headers)?;
     let content_length = check_and_get_content_length(&headers, &parsed_headers)?;
+    let force_sync = check_and_get_force_sync(&headers);
     let mut stream = body.into_data_stream();
 
     let process_stream = async {
@@ -81,7 +83,7 @@ pub(super) async fn write_batched_records(
 
         receive_body_and_write_records(
             bucket,
-            components,
+            components.clone(),
             content_length as i64,
             &mut stream,
             rx_writer,
@@ -104,6 +106,11 @@ pub(super) async fn write_batched_records(
                 resp_headers.insert(name, value);
             });
 
+            if force_sync {
+                for entry in entries.iter() {
+                    sync_entry(Arc::clone(&components), bucket, entry).await?;
+                }
+            }
             Ok(resp_headers.into())
         }
         Err(err) => {
@@ -248,13 +255,9 @@ async fn receive_body_and_write_records(
                 Ok(Some(rest)) => {
                     // finish writing the current record and start a new one
                     // finished writing the current record
-                    if let Err(err) = ctx
-                        .writer
+                    ctx.writer
                         .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
-                        .await
-                    {
-                        debug!("Timeout while sending EOF: {}", err);
-                    }
+                        .await?;
 
                     notify_replication_write(&components, bucket, &ctx).await?;
                     chunk = rest;
@@ -318,26 +321,6 @@ async fn spawn_getting_writers(
     Ok((rx_writer, spawn_handler))
 }
 
-async fn write_chunk(
-    writer: &mut Box<dyn WriteRecord + Sync + Send>,
-    chunk: Bytes,
-    written: &mut usize,
-    content_size: u64,
-    io_timeout: std::time::Duration,
-) -> Result<Option<Bytes>, ReductError> {
-    let to_write = content_size - *written as u64;
-    *written += chunk.len();
-    let (chunk, rest) = if (chunk.len() as u64) < to_write {
-        (chunk, None)
-    } else {
-        let chuck_to_write = chunk.slice(0..to_write as usize);
-        (chuck_to_write, Some(chunk.slice(to_write as usize..)))
-    };
-
-    writer.send_timeout(Ok(Some(chunk)), io_timeout).await?;
-    Ok(rest)
-}
-
 async fn start_writing(
     bucket_name: &str,
     entry_name: &str,
@@ -391,11 +374,17 @@ mod tests {
     use std::time::Duration;
 
     #[rstest]
+    #[case::absent(None, false)]
+    #[case::disabled(Some("false"), false)]
+    #[case::enabled(Some("true"), true)]
+    #[case::invalid(Some("invalid"), false)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records_multiple_entries(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_bucket_1: Path<HashMap<String, String>>,
+        #[case] sync_header: Option<&str>,
+        #[case] force_sync: bool,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
@@ -408,6 +397,9 @@ mod tests {
             .await
             .unwrap();
         headers.insert("content-length", HeaderValue::from_static("10"));
+        if let Some(value) = sync_header {
+            headers.insert("x-reduct-sync-write", value.parse().unwrap());
+        }
         headers.insert(
             "x-reduct-entries",
             HeaderValue::from_str(
@@ -450,6 +442,33 @@ mod tests {
             .await
             .unwrap()
             .upgrade_and_unwrap();
+
+        for (entry_name, block_id, timestamp, content) in [
+            ("entry-1", 0, 1000, b"aaaa".as_slice()),
+            ("entry-1", 0, 1010, b"bb".as_slice()),
+            ("entry-2", 1000, 1000, b"CCC".as_slice()),
+            ("entry-2", 1000, 1005, b"d".as_slice()),
+        ] {
+            let entry = bucket
+                .get_entry(entry_name)
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            if force_sync {
+                crate::api::http::tests::assert_record_persisted(
+                    entry.path(),
+                    block_id,
+                    timestamp,
+                    content,
+                );
+            } else {
+                crate::api::http::tests::assert_record_not_persisted(
+                    entry.path(),
+                    block_id,
+                    timestamp,
+                );
+            }
+        }
 
         {
             let mut reader = bucket.begin_read("entry-1", 1000).await.unwrap();
@@ -655,6 +674,54 @@ mod tests {
                 labels: Labels::new(),
             },
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_receive_body_and_write_records_eof_error(#[future] keeper: Arc<StateKeeper>) {
+        struct EofErrorWriter;
+
+        #[async_trait::async_trait]
+        impl WriteRecord for EofErrorWriter {
+            async fn send(
+                &mut self,
+                chunk: reduct_base::io::WriteChunk,
+            ) -> Result<(), ReductError> {
+                match chunk {
+                    Ok(None) => Err(internal_server_error!("Failed to finalize record")),
+                    _ => Ok(()),
+                }
+            }
+
+            async fn send_timeout(
+                &mut self,
+                chunk: reduct_base::io::WriteChunk,
+                _timeout: Duration,
+            ) -> Result<(), ReductError> {
+                self.send(chunk).await
+            }
+        }
+
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.send(WriteContext {
+            entry_name: "entry-1".to_string(),
+            time: 0,
+            header: make_entry_header(3),
+            writer: Box::new(EofErrorWriter),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+
+        let mut stream = Body::from("abc").into_data_stream();
+        let err =
+            receive_body_and_write_records(&"bucket-1".to_string(), components, 3, &mut stream, rx)
+                .await
+                .unwrap_err();
+
+        assert_eq!(err, internal_server_error!("Failed to finalize record"));
     }
 
     #[tokio::test]
