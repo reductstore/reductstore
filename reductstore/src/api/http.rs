@@ -354,6 +354,43 @@ pub(crate) mod tests {
         assert_eq!(check_and_get_force_sync(&headers), expected);
     }
 
+    #[rstest::rstest]
+    #[case::descriptor("0.meta")]
+    #[case::index("blocks.idx")]
+    #[tokio::test]
+    async fn test_sync_entry_reports_persistence_failure(
+        #[future] keeper: Arc<StateKeeper>,
+        #[case] filename: &str,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        let path = entry.path().join(filename);
+
+        // Evict the cached descriptor so the next write encounters the directory.
+        components.storage.file_cache().remove(&path).await.unwrap();
+        std::fs::create_dir(&path).unwrap();
+
+        let err = sync_entry(components, "bucket-1", "entry-1")
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err
+            .message()
+            .starts_with("Failed to sync entry bucket-1/entry-1 to disk: "));
+        assert!(err.message().len() > "Failed to sync entry bucket-1/entry-1 to disk: ".len());
+    }
+
     pub(crate) fn assert_record_persisted(
         entry_path: &std::path::Path,
         block_id: u64,
