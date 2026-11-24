@@ -9,7 +9,7 @@ impl BlockManager {
         for block in blocks.iter() {
             {
                 let block_id = block.read().await?.block_id();
-                self.sync_data_block(block_id).await?;
+                self.save_datas_block_on_disk(block_id).await?;
             }
             self.save_meta_on_disk(block.clone()).await?;
         }
@@ -47,7 +47,7 @@ impl BlockManager {
         Ok(())
     }
 
-    pub(super) async fn sync_data_block(&self, block_id: u64) -> Result<(), ReductError> {
+    pub(super) async fn save_datas_block_on_disk(&self, block_id: u64) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
             return Ok(());
         }
@@ -159,7 +159,7 @@ mod tests {
         )
         .await
         .unwrap();
-        block_manager.sync_data_block(1).await.unwrap();
+        block_manager.save_datas_block_on_disk(1).await.unwrap();
     }
 
     #[rstest]
@@ -178,7 +178,7 @@ mod tests {
         )
         .await
         .unwrap();
-        block_manager.sync_data_block(999).await.unwrap();
+        block_manager.save_datas_block_on_disk(999).await.unwrap();
     }
 
     #[rstest]

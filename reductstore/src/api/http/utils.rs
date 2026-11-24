@@ -11,7 +11,7 @@ use futures_util::Future;
 use futures_util::Stream;
 use hyper::header::CONTENT_TYPE;
 use reduct_base::error::ReductError;
-use reduct_base::io::{BoxedReadRecord, RecordMeta};
+use reduct_base::io::{BoxedReadRecord, RecordMeta, WriteRecord};
 use reduct_base::{internal_server_error, unprocessable_entity};
 use std::collections::Bound::Included;
 use std::collections::{Bound, VecDeque};
@@ -21,6 +21,26 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::Mutex;
+
+pub(super) async fn write_chunk(
+    writer: &mut Box<dyn WriteRecord + Sync + Send>,
+    chunk: Bytes,
+    written: &mut usize,
+    content_size: u64,
+    io_timeout: std::time::Duration,
+) -> Result<Option<Bytes>, ReductError> {
+    let to_write = content_size - *written as u64;
+    *written += chunk.len();
+    let (chunk, rest) = if (chunk.len() as u64) < to_write {
+        (chunk, None)
+    } else {
+        let chunk_to_write = chunk.slice(0..to_write as usize);
+        (chunk_to_write, Some(chunk.slice(to_write as usize..)))
+    };
+
+    writer.send_timeout(Ok(Some(chunk)), io_timeout).await?;
+    Ok(rest)
+}
 
 pub(super) fn make_headers_from_reader(meta: &RecordMeta) -> HeaderMap {
     let mut headers = HeaderMap::new();

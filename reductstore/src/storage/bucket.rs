@@ -232,9 +232,8 @@ impl Bucket {
         content_size: u64,
         content_type: String,
         labels: Labels,
-        force_sync: bool,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
-        self.begin_write_impl(name, time, content_size, content_type, labels, force_sync)
+        self.begin_write_impl(name, time, content_size, content_type, labels)
             .await
     }
 
@@ -258,7 +257,6 @@ impl Bucket {
         content_size: u64,
         content_type: String,
         labels: Labels,
-        force_sync: bool,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.check_mode()?;
         crate::storage::engine::check_entry_name_convention(name)?;
@@ -279,7 +277,7 @@ impl Bucket {
         };
 
         entry
-            .begin_write(time, content_size, content_type, labels, force_sync)
+            .begin_write(time, content_size, content_type, labels)
             .await
     }
 

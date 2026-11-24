@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::components::CLIENT_IP_HEADER;
-use crate::api::http::HttpError;
+use crate::api::http::{check_and_get_force_sync, sync_entry, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -95,6 +95,7 @@ pub(super) async fn write_record(
         Ok((ts, labels, sender))
     };
 
+    let force_sync = check_and_get_force_sync(&headers);
     let io_timeout = components.cfg.io_conf.operation_timeout;
     match check_request_and_get_sender.await {
         Ok((ts, labels, mut writer)) => {
@@ -136,6 +137,10 @@ pub(super) async fn write_record(
                     event: WriteRecord(ts),
                 })
                 .await?;
+
+            if force_sync {
+                sync_entry(components.clone(), &bucket, path.get("entry_name").unwrap()).await?;
+            }
             Ok(())
         }
         Err(e) => {

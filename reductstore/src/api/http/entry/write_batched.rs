@@ -2,7 +2,10 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::components::CLIENT_IP_HEADER;
-use crate::api::http::{Components, HttpError};
+use crate::api::http::utils::write_chunk;
+use crate::api::http::{
+    check_and_get_force_sync, sync_entry, Components, HttpError, SYNC_WRITE_HEADER,
+};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::{Body, BodyDataStream};
 use axum::extract::{Path, State};
@@ -47,6 +50,7 @@ pub(super) async fn write_batched_records(
         .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket })
         .await?;
 
+    let force_sync = check_and_get_force_sync(&headers);
     let entry_name = path.get("entry_name").unwrap().clone();
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
     let mut stream = body.into_data_stream();
@@ -78,8 +82,8 @@ pub(super) async fn write_batched_records(
             spawn_getting_writers(&components, &bucket, &entry_name, timed_headers).await?;
         receive_body_and_write_records(
             bucket,
-            entry_name,
-            components,
+            entry_name.clone(),
+            components.clone(),
             content_length as i64,
             &mut stream,
             rx_writer,
@@ -97,6 +101,10 @@ pub(super) async fn write_batched_records(
             error_map.iter().for_each(|(time, err)| {
                 err_to_batched_header(&mut headers, *time, err);
             });
+
+            if force_sync {
+                sync_entry(components.clone(), &bucket, &entry_name).await?;
+            }
 
             Ok(headers.into())
         }
@@ -253,26 +261,6 @@ async fn spawn_getting_writers(
     });
 
     Ok((rx_writer, spawn_handler))
-}
-
-async fn write_chunk(
-    writer: &mut Box<dyn WriteRecord + Sync + Send>,
-    chunk: Bytes,
-    written: &mut usize,
-    content_size: u64,
-    io_timeout: std::time::Duration,
-) -> Result<Option<Bytes>, ReductError> {
-    let to_write = content_size - *written as u64;
-    *written += chunk.len();
-    let (chunk, rest) = if (chunk.len() as u64) < to_write {
-        (chunk, None)
-    } else {
-        let chuck_to_write = chunk.slice(0..to_write as usize);
-        (chuck_to_write, Some(chunk.slice(to_write as usize..)))
-    };
-
-    writer.send_timeout(Ok(Some(chunk)), io_timeout).await?;
-    Ok(rest)
 }
 
 fn check_and_get_content_length(

@@ -100,7 +100,6 @@ impl Entry {
         content_size: u64,
         content_type: String,
         labels: Labels,
-        force_sync: bool,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_not_deleting().await?;
         let publication = self.publication.begin_mutation(&self.path).await?;

@@ -3,7 +3,8 @@
 
 use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::entry::common::parse_content_length_from_header;
-use crate::api::http::Components;
+use crate::api::http::utils::write_chunk;
+use crate::api::http::{check_and_get_force_sync, sync_entry, Components};
 use crate::api::http::{HttpError, StateKeeper};
 use crate::api::limits::limit_scope_from_client_ip;
 use crate::auth::policy::WriteAccessPolicy;
@@ -64,6 +65,7 @@ pub(super) async fn write_batched_records(
     let start_ts = parse_start_timestamp(&headers)?;
     let parsed_headers = parse_and_index_headers(&entries, &headers)?;
     let content_length = check_and_get_content_length(&headers, &parsed_headers)?;
+    let force_sync = check_and_get_force_sync(&headers);
     let mut stream = body.into_data_stream();
 
     let process_stream = async {
@@ -81,7 +83,7 @@ pub(super) async fn write_batched_records(
 
         receive_body_and_write_records(
             bucket,
-            components,
+            components.clone(),
             content_length as i64,
             &mut stream,
             rx_writer,
@@ -104,6 +106,11 @@ pub(super) async fn write_batched_records(
                 resp_headers.insert(name, value);
             });
 
+            if force_sync {
+                for entry in entries.iter() {
+                    sync_entry(Arc::clone(&components), bucket, entry).await?;
+                }
+            }
             Ok(resp_headers.into())
         }
         Err(err) => {
@@ -316,26 +323,6 @@ async fn spawn_getting_writers(
     });
 
     Ok((rx_writer, spawn_handler))
-}
-
-async fn write_chunk(
-    writer: &mut Box<dyn WriteRecord + Sync + Send>,
-    chunk: Bytes,
-    written: &mut usize,
-    content_size: u64,
-    io_timeout: std::time::Duration,
-) -> Result<Option<Bytes>, ReductError> {
-    let to_write = content_size - *written as u64;
-    *written += chunk.len();
-    let (chunk, rest) = if (chunk.len() as u64) < to_write {
-        (chunk, None)
-    } else {
-        let chuck_to_write = chunk.slice(0..to_write as usize);
-        (chuck_to_write, Some(chunk.slice(to_write as usize..)))
-    };
-
-    writer.send_timeout(Ok(Some(chunk)), io_timeout).await?;
-    Ok(rest)
 }
 
 async fn start_writing(

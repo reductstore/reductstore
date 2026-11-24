@@ -247,7 +247,6 @@ impl BlockManager {
         block_id: u64,
         state: record::State,
         record_timestamp: u64,
-        force_sync: bool,
     ) -> Result<(), ReductError> {
         // check if the block is still in cache
         let block_ref = if let Some(block_ref) = self.block_cache.get_write(&block_id) {

@@ -19,7 +19,7 @@ use crate::api::http::io::create_io_api_routes;
 use crate::api::http::ui::{redirect_to_index, show_ui};
 use crate::cfg::Cfg;
 use crate::lock_file::BoxedLockFile;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{
@@ -35,9 +35,9 @@ use middleware::{
     attach_client_ip, audit_requests, check_api_rate_limit, default_headers, print_statuses,
     validate_replication_identity,
 };
-use reduct_base::bad_request;
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
+use reduct_base::{bad_request, internal_server_error};
 use replication::create_replication_api_routes;
 use serde::de::StdError;
 use server::create_server_api_routes;
@@ -47,6 +47,8 @@ use token::create_token_api_routes;
 use tokio::sync::mpsc::Receiver;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::decompression::RequestDecompressionLayer;
+
+const SYNC_WRITE_HEADER: &str = "x-reduct-sync-write";
 
 #[derive(PartialEq, Clone)]
 pub struct HttpError {
@@ -300,6 +302,38 @@ impl AxumAppBuilder {
             cors_layer.allow_origin(parsed_origins)
         }
     }
+}
+
+pub(super) fn check_and_get_force_sync(headers: &HeaderMap) -> bool {
+    headers
+        .get(SYNC_WRITE_HEADER)
+        .map(|value| value == "true")
+        .unwrap_or(false)
+}
+
+pub(super) async fn sync_entry(
+    components: Arc<Components>,
+    bucket: &str,
+    entry_name: &str,
+) -> Result<(), HttpError> {
+    let entry = components
+        .storage
+        .get_bucket(&bucket)
+        .await?
+        .upgrade()?
+        .get_entry(&entry_name)
+        .await?
+        .upgrade()?;
+
+    entry.sync_fs().await.map_err(|e| {
+        internal_server_error!(
+            "Failed to sync entry {}/{} to disk: {}",
+            bucket,
+            entry_name,
+            e
+        )
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
