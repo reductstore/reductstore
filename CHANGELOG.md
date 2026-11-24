@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add opt-in synchronous durability for single-record and batch HTTP writes with `x-reduct-sync-write: true`, [#1747](https://github.com/reductstore/reductstore/pull/1747)
 - Add key-prefix Zenoh bucket routing and multiple key expression support, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
 
 ### Fixed
