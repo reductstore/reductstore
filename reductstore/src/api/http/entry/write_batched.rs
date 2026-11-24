@@ -197,13 +197,9 @@ async fn receive_body_and_write_records(
                 Ok(Some(rest)) => {
                     // finish writing the current record and start a new one
                     // finished writing the current record
-                    if let Err(err) = ctx
-                        .writer
+                    ctx.writer
                         .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
-                        .await
-                    {
-                        debug!("Timeout while sending EOF: {}", err);
-                    }
+                        .await?;
 
                     notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
                     chunk = rest;
@@ -391,12 +387,15 @@ mod tests {
     }
 
     #[rstest]
+    #[case(false)]
+    #[case(true)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
+        #[case] force_sync: bool,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
@@ -409,6 +408,10 @@ mod tests {
             .await
             .unwrap();
         headers.insert("content-length", "48".parse().unwrap());
+        headers.insert(
+            "x-reduct-sync-write",
+            force_sync.to_string().parse().unwrap(),
+        );
         headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
         headers.insert(
             "x-reduct-time-2",
@@ -428,6 +431,26 @@ mod tests {
             .await
             .unwrap()
             .upgrade_and_unwrap();
+
+        if force_sync {
+            let entry = bucket
+                .get_entry("entry-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            for (timestamp, content) in [
+                (1, b"1234567890".as_slice()),
+                (2, b"abcdef1234567890abcd".as_slice()),
+                (10, b"ef1234567890abcdef".as_slice()),
+            ] {
+                crate::api::http::tests::assert_record_persisted(
+                    entry.path(),
+                    0,
+                    timestamp,
+                    content,
+                );
+            }
+        }
 
         {
             let mut reader = bucket

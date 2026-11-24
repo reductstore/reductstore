@@ -122,9 +122,7 @@ pub(super) async fn write_record(
                 send_chunk!(chunk);
             }
 
-            if let Err(err) = writer.send_timeout(Ok(None), io_timeout).await {
-                debug!("Timeout while sending EOF: {}", err);
-            }
+            writer.send_timeout(Ok(None), io_timeout).await?;
 
             components
                 .replication_repo
@@ -171,15 +169,22 @@ mod tests {
     use tokio::time::{sleep, Duration};
 
     #[rstest]
+    #[case(false)]
+    #[case(true)]
     #[tokio::test]
     async fn test_write_with_label_ok(
         #[future] keeper: Arc<StateKeeper>,
-        headers: HeaderMap,
+        mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
+        #[case] force_sync: bool,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
+        headers.insert(
+            "x-reduct-sync-write",
+            force_sync.to_string().parse().unwrap(),
+        );
         write_record(
             State(keeper),
             headers,
@@ -192,6 +197,20 @@ mod tests {
         )
         .await
         .unwrap();
+
+        if force_sync {
+            let entry = components
+                .storage
+                .get_bucket("bucket-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap()
+                .get_entry("entry-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            crate::api::http::tests::assert_record_persisted(entry.path(), 0, 1, b"");
+        }
 
         let record = components
             .storage

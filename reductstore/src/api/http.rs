@@ -339,6 +339,41 @@ pub(super) async fn sync_entry(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[rstest::rstest]
+    #[case(None, false)]
+    #[case(Some("false"), false)]
+    #[case(Some("true"), true)]
+    #[case(Some("TRUE"), false)]
+    #[case(Some("invalid"), false)]
+    fn test_check_and_get_force_sync(#[case] value: Option<&str>, #[case] expected: bool) {
+        let mut headers = HeaderMap::new();
+        if let Some(value) = value {
+            headers.insert(SYNC_WRITE_HEADER, value.parse().unwrap());
+        }
+        assert_eq!(check_and_get_force_sync(&headers), expected);
+    }
+
+    pub(crate) fn assert_record_persisted(
+        entry_path: &std::path::Path,
+        block_id: u64,
+        timestamp: u64,
+        content: &[u8],
+    ) {
+        use crate::storage::proto::{record, ts_to_us, Block};
+        use prost::Message;
+
+        let metadata = std::fs::read(entry_path.join(format!("{block_id}.meta"))).unwrap();
+        let block = Block::decode(metadata.as_slice()).unwrap();
+        let record = block
+            .records
+            .iter()
+            .find(|record| ts_to_us(record.timestamp.as_ref().unwrap()) == timestamp)
+            .expect("record must be persisted before the response");
+        assert_eq!(record.state, record::State::Finished as i32);
+        let data = std::fs::read(entry_path.join(format!("{block_id}.blk"))).unwrap();
+        assert_eq!(&data[record.begin as usize..record.end as usize], content);
+    }
     use crate::api::components::ComponentError;
     use crate::api::limits::{LimitsBuilder, LimitsConfig, WindowLimit};
     use crate::asset::asset_manager::create_asset_manager;

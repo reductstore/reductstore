@@ -255,13 +255,9 @@ async fn receive_body_and_write_records(
                 Ok(Some(rest)) => {
                     // finish writing the current record and start a new one
                     // finished writing the current record
-                    if let Err(err) = ctx
-                        .writer
+                    ctx.writer
                         .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
-                        .await
-                    {
-                        debug!("Timeout while sending EOF: {}", err);
-                    }
+                        .await?;
 
                     notify_replication_write(&components, bucket, &ctx).await?;
                     chunk = rest;
@@ -378,11 +374,14 @@ mod tests {
     use std::time::Duration;
 
     #[rstest]
+    #[case(false)]
+    #[case(true)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records_multiple_entries(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_bucket_1: Path<HashMap<String, String>>,
+        #[case] force_sync: bool,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
@@ -395,6 +394,10 @@ mod tests {
             .await
             .unwrap();
         headers.insert("content-length", HeaderValue::from_static("10"));
+        headers.insert(
+            "x-reduct-sync-write",
+            force_sync.to_string().parse().unwrap(),
+        );
         headers.insert(
             "x-reduct-entries",
             HeaderValue::from_str(
@@ -437,6 +440,27 @@ mod tests {
             .await
             .unwrap()
             .upgrade_and_unwrap();
+
+        if force_sync {
+            for (entry_name, block_id, timestamp, content) in [
+                ("entry-1", 0, 1000, b"aaaa".as_slice()),
+                ("entry-1", 0, 1010, b"bb".as_slice()),
+                ("entry-2", 1000, 1000, b"CCC".as_slice()),
+                ("entry-2", 1000, 1005, b"d".as_slice()),
+            ] {
+                let entry = bucket
+                    .get_entry(entry_name)
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap();
+                crate::api::http::tests::assert_record_persisted(
+                    entry.path(),
+                    block_id,
+                    timestamp,
+                    content,
+                );
+            }
+        }
 
         {
             let mut reader = bucket.begin_read("entry-1", 1000).await.unwrap();
@@ -642,6 +666,54 @@ mod tests {
                 labels: Labels::new(),
             },
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_receive_body_and_write_records_eof_error(#[future] keeper: Arc<StateKeeper>) {
+        struct EofErrorWriter;
+
+        #[async_trait::async_trait]
+        impl WriteRecord for EofErrorWriter {
+            async fn send(
+                &mut self,
+                chunk: reduct_base::io::WriteChunk,
+            ) -> Result<(), ReductError> {
+                match chunk {
+                    Ok(None) => Err(internal_server_error!("Failed to finalize record")),
+                    _ => Ok(()),
+                }
+            }
+
+            async fn send_timeout(
+                &mut self,
+                chunk: reduct_base::io::WriteChunk,
+                _timeout: Duration,
+            ) -> Result<(), ReductError> {
+                self.send(chunk).await
+            }
+        }
+
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.send(WriteContext {
+            entry_name: "entry-1".to_string(),
+            time: 0,
+            header: make_entry_header(3),
+            writer: Box::new(EofErrorWriter),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+
+        let mut stream = Body::from("abc").into_data_stream();
+        let err =
+            receive_body_and_write_records(&"bucket-1".to_string(), components, 3, &mut stream, rx)
+                .await
+                .unwrap_err();
+
+        assert_eq!(err, internal_server_error!("Failed to finalize record"));
     }
 
     #[tokio::test]
