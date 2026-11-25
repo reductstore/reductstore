@@ -87,7 +87,7 @@ runs:
 
     - name: Use cache for Cargo downloads
       if: steps.s3_cache.outputs.enabled == 'true'
-      uses: runs-on/cache@v4
+      uses: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203 # v5.0.7
       with:
         path: |
           ~/.cargo/registry/index/
@@ -104,10 +104,11 @@ runs:
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
         AWS_REGION: fsn1
         AWS_DEFAULT_REGION: fsn1
+        DOWNLOAD_QUEUE_SIZE: 4
 
     - name: Use cache for Cargo target
       if: steps.s3_cache.outputs.enabled == 'true'
-      uses: runs-on/cache@v4
+      uses: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203 # v5.0.7
       with:
         path: target/
         key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
@@ -121,3 +122,4 @@ runs:
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
         AWS_REGION: fsn1
         AWS_DEFAULT_REGION: fsn1
+        DOWNLOAD_QUEUE_SIZE: 4
