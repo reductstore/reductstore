@@ -104,6 +104,7 @@ runs:
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
         AWS_REGION: fsn1
         AWS_DEFAULT_REGION: fsn1
+        DOWNLOAD_PART_SIZE: 4
         DOWNLOAD_QUEUE_SIZE: 4
 
     - name: Use cache for Cargo target
@@ -122,4 +123,5 @@ runs:
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
         AWS_REGION: fsn1
         AWS_DEFAULT_REGION: fsn1
+        DOWNLOAD_PART_SIZE: 4
         DOWNLOAD_QUEUE_SIZE: 4
