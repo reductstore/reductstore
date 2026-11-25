@@ -1,5 +1,5 @@
-name: 'Cargo cache and S3 sccache'
-description: 'Restores Cargo dependencies and build artifacts, and configures S3-backed sccache.'
+name: 'AWS Credentials and Cargo Cache'
+description: 'Configures Cargo target caching, S3-backed sccache, and a small Cargo download cache.'
 inputs:
   target:
     description: 'Target triple.'
@@ -28,26 +28,6 @@ runs:
           echo "Using preset RUST_MINOR=${RUST_MINOR}"
         fi
 
-    - name: Restore Cargo downloads cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: |
-          ~/.cargo/bin/cargo-export
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-        key: cargo-downloads-v1-${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-rust${{ env.RUST_MINOR }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
-        restore-keys: |
-          cargo-downloads-v1-${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-rust${{ env.RUST_MINOR }}-
-
-    - name: Restore Cargo target cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: target
-        key: cargo-target-v1-${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-rust${{ env.RUST_MINOR }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
-        restore-keys: |
-          cargo-target-v1-${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-rust${{ env.RUST_MINOR }}-
-
     - name: Detect S3 cache credentials
       id: s3_cache
       shell: bash
@@ -57,9 +37,11 @@ runs:
       run: |
         if [[ -n "${AWS_ACCESS_KEY_ID}" && -n "${AWS_SECRET_ACCESS_KEY}" ]]; then
           echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "S3_CARGO_CACHE_ENABLED=true" >> "$GITHUB_ENV"
         else
           echo "enabled=false" >> "$GITHUB_OUTPUT"
-          echo "S3 sccache is disabled because credentials are unavailable."
+          echo "S3_CARGO_CACHE_ENABLED=false" >> "$GITHUB_ENV"
+          echo "S3 Cargo cache is disabled because credentials are unavailable."
         fi
     #
     #    - name: Configure AWS credentials via OIDC (org-wide role)
@@ -102,3 +84,42 @@ runs:
         } >> "$GITHUB_ENV"
 
         sccache --start-server
+
+    - name: Use cache for Cargo downloads
+      if: steps.s3_cache.outputs.enabled == 'true'
+      uses: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203 # v5.0.7
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          ~/.cargo/bin/cargo-export
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-downloads-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-downloads-rust${{ env.RUST_MINOR }}-
+      env:
+        RUNS_ON_S3_BUCKET_CACHE: reduct-cache
+        RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        AWS_REGION: fsn1
+        AWS_DEFAULT_REGION: fsn1
+        DOWNLOAD_QUEUE_SIZE: 4
+
+    - name: Use cache for Cargo target
+      if: steps.s3_cache.outputs.enabled == 'true'
+      uses: runs-on/cache@88d90644011a3a9957fd141a106f5a94f9794203 # v5.0.7
+      with:
+        path: target/
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-
+      env:
+        RUNS_ON_S3_BUCKET_CACHE: reduct-cache
+        RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        AWS_REGION: fsn1
+        AWS_DEFAULT_REGION: fsn1
+        DOWNLOAD_QUEUE_SIZE: 4

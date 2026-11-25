@@ -44,7 +44,7 @@ runs:
 
     - uses: ilammy/setup-nasm@v1
 
-    - name: Configure Cargo cache and S3 sccache
+    - name: AWS Credentials and Cargo Cache
       uses: ./.github/actions/aws-cargo-cache
       with:
         target: ${{ inputs.target }}
