@@ -26,7 +26,7 @@ runs:
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
 
-    - name: Configure S3 sccache
+    - name: Configure Cargo cache and S3 sccache
       uses: ./.github/actions/aws-cargo-cache
       with:
         target: ${{ inputs.target }}

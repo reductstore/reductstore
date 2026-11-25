@@ -1,5 +1,5 @@
-name: 'AWS Credentials and S3 sccache'
-description: 'Configures S3-backed sccache for Cargo builds.'
+name: 'Cargo cache and S3 sccache'
+description: 'Restores Cargo dependencies and build artifacts, and configures S3-backed sccache.'
 inputs:
   target:
     description: 'Target triple.'
@@ -27,6 +27,26 @@ runs:
         else
           echo "Using preset RUST_MINOR=${RUST_MINOR}"
         fi
+
+    - name: Restore Cargo downloads cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/bin/cargo-export
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: cargo-downloads-v1-${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-rust${{ env.RUST_MINOR }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+        restore-keys: |
+          cargo-downloads-v1-${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-rust${{ env.RUST_MINOR }}-
+
+    - name: Restore Cargo target cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: target
+        key: cargo-target-v1-${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-rust${{ env.RUST_MINOR }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+        restore-keys: |
+          cargo-target-v1-${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-rust${{ env.RUST_MINOR }}-
 
     - name: Detect S3 cache credentials
       id: s3_cache
