@@ -104,7 +104,8 @@ runs:
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
         AWS_REGION: fsn1
         AWS_DEFAULT_REGION: fsn1
-        DOWNLOAD_QUEUE_SIZE: 4
+        DOWNLOAD_PART_SIZE: 2
+        DOWNLOAD_QUEUE_SIZE: 8
 
     - name: Use cache for Cargo target
       if: steps.s3_cache.outputs.enabled == 'true'
@@ -122,4 +123,5 @@ runs:
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
         AWS_REGION: fsn1
         AWS_DEFAULT_REGION: fsn1
-        DOWNLOAD_QUEUE_SIZE: 4
+        DOWNLOAD_PART_SIZE: 2
+        DOWNLOAD_QUEUE_SIZE: 8
